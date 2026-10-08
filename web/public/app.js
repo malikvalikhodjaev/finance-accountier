@@ -85,7 +85,7 @@ function filterForm(onChange) {
 function query(filters = state.filters) { return new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== '' && value != null)); }
 function importStatement() {
   const file = el('input', { type: 'file', accept: 'application/pdf,.pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.xlsx', 'aria-label': 'Файл банковской выписки' });
-  const bank = select([['uzum', 'Uzum Bank · выписка на английском'], ['ipak', 'Ipak Yuli · PDF истории'], ['payme', 'Payme · Excel']]);
+  const bank = select([['uzum', 'Uzum Bank · выписка на английском'], ['ipak', 'Ipak Yuli · PDF истории'], ['payme', 'Payme · Excel']], 'uzum');
   const card = el('input', { maxlength: '120', 'aria-label': 'Последние четыре цифры своих карт', placeholder: 'Например: 2670, 6351' });
   const status = el('p', { class: 'subtle' });
   modal('Импорт выписки', el('div', {}, el('p', { text: 'Выбери исходный PDF банка или Excel Payme. Для Payme укажи свои карты через запятую: покупки по остальным картам останутся на проверке. Для Ipak можно указать одну карту, если история относится к ней.' }), field('Источник файла', bank), field('Свои карты: последние четыре цифры', card), file, status), null);

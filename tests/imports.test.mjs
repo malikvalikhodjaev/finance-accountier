@@ -124,6 +124,10 @@ test('Payme: XLSX сохраняет категории и отмены; пер�
     assert.equal(repeat.summary.existing, 4); assert.equal(importer.commit(repeat.id).inserted, 0); assert.equal(store.get(expense.id).category, 'Моя категория');
     current = { ...current, rows: [paymeRow(1, '1234', 'продукты', true, 77700)] };
     const changed = await importer.upload(input); assert.equal(changed.summary.duplicates, 1); importer.commit(changed.id);
+    current = { ...current, rows: [paymeRow(1, '1234', 'продукты', false)] };
+    const cancellation = await importer.upload(input); assert.equal(cancellation.summary.review, 1); assert.equal(cancellation.summary.ignored, 0);
+    assert.match(cancellation.rows[0].reason, /прежняя операция сохранена/);
+    importer.commit(cancellation.id); assert.equal(store.get(expense.id).state, 'recorded');
     assert.equal(aggregate(store.all(false), { metric: 'expense', group: '' }, { period: 'all' })[0].amountMinor, String(expense.amount_minor));
     await assert.rejects(importer.upload({ ...input, ownCards: ['1234567890123456'] }), /четыре/);
     await assert.rejects(importer.upload({ ...input, bank: 'uzum' }), /формат/);

@@ -99,7 +99,7 @@ export function createImporter(store, directory, { parser = null } = {}) {
       return { ...item, rowHash, eventId: known.event_id, status: 'existing' };
     }
     if (existing.some(event => event.fingerprint === item.event.fingerprint)) fail('Запись уже существует без связи с архивом выписки. Нужна сверка; существующая операция сохранена.', 409);
-    if (item.matchKey && item.row.paid && store.db.prepare('SELECT 1 FROM bank_match_keys WHERE match_key=? LIMIT 1').get(item.matchKey)) return { ...item, rowHash, status: 'new', event: { ...item.event, state: 'duplicate', review_reason: 'В Payme уже есть строка с этим временем, картой и поставщиком. Сумма или статус изменились либо это другая оплата. Сверь исходные чеки; прежняя операция сохранена.' } };
+    if (item.matchKey && store.db.prepare('SELECT 1 FROM bank_match_keys WHERE match_key=? LIMIT 1').get(item.matchKey)) return { ...item, rowHash, status: 'new', event: { ...item.event, state: item.row.paid ? 'duplicate' : 'review', review_reason: 'В Payme уже есть строка с этим временем, картой и поставщиком. Сумма или статус изменились либо это другая оплата. Сверь исходные чеки; прежняя операция сохранена.' } };
     if (!item.event.time || item.event.kind === 'unknown' || item.event.state === 'ignored') return { ...item, rowHash, status: 'new' };
     const at = Date.parse((item.row.authorizationDate || item.event.date) + 'T' + (item.row.authorizationTime || item.event.time) + '+05:00');
     const possible = existing.filter(event => event.source_type !== 'bank_export' && !['ignored', 'duplicate'].includes(event.state) && event.amount_minor === item.event.amount_minor && event.currency === item.event.currency && event.card_suffix && event.card_suffix === item.event.card_suffix && Math.abs(Date.parse(event.date + 'T' + (event.time || '00:00') + '+05:00') - at) <= 120000);
@@ -125,6 +125,7 @@ export function createImporter(store, directory, { parser = null } = {}) {
     try {
       const id = randomUUID(), target = path.join(folder, id), at = new Date().toISOString(); mkdirSync(target);
       const file = path.join(target, excel ? 'source.xlsx' : 'source.pdf'); writeFileSync(file, bytes, { flag: 'wx' });
+      writeFileSync(path.join(target, 'receipt.json'), JSON.stringify({ filename: path.basename(input.filename.replaceAll('\\', '/')), bank, sha256: hash(bytes), bytes: bytes.length, receivedAt: at }, null, 2), { flag: 'wx' });
       let parsed;
       if (parser) parsed = await parser(file, bank);
       else {
