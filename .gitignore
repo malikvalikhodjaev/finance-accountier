@@ -8,3 +8,5 @@ local.properties
 .web/
 tests/dashboard-import.mjs
 tests/acceptance/payment-purpose.feature
+__pycache__/
+*.pyc

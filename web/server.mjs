@@ -5,14 +5,16 @@ import { networkInterfaces } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createStore, hash, fail, selectRows, aggregate, editableKeys, normaliseEvent } from './store.mjs';
+import { createImporter } from './imports.mjs';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const assets = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'], '/icon.svg': ['icon.svg', 'image/svg+xml'] };
 const token = () => randomBytes(32).toString('base64url');
 const privateIP = ip => /^(?:10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.)/.test(ip);
-export function createFinanceServer({ directory = path.join(root, '.web'), allowLocalLogin = true, advertisedHost = null, port = 8788 } = {}) {
+export function createFinanceServer({ directory = path.join(root, '.web'), allowLocalLogin = true, advertisedHost = null, port = 8788, importParser = null } = {}) {
   mkdirSync(directory, { recursive: true });
   const store = createStore(path.join(directory, 'money.sqlite'));
+  const importer = createImporter(store, directory, { parser: importParser });
   const credentialsPath = path.join(directory, 'auth.json');
   if (!existsSync(credentialsPath)) {
     const password = token(), salt = randomBytes(16).toString('hex');
@@ -107,6 +109,12 @@ export function createFinanceServer({ directory = path.join(root, '.web'), allow
         return json(res, 200, store.sync(await body(req), identity.deviceId));
       }
       if (identity.mobile) fail('Открой таблицы внутри приложения.', 403);
+      if (req.method === 'POST' && url.pathname === '/api/imports/preview') return json(res, 201, await importer.upload(await body(req)));
+      if (/^\/api\/imports\/[a-f0-9-]{36}(?:\/commit)?$/.test(url.pathname)) {
+        const id = url.pathname.split('/')[3];
+        if (req.method === 'GET' && !url.pathname.endsWith('/commit')) return json(res, 200, importer.preview(id));
+        if (req.method === 'POST' && url.pathname.endsWith('/commit')) return json(res, 200, importer.commit(id));
+      }
       if (req.method === 'POST' && url.pathname === '/api/logout') { const value = req.headers.cookie?.match(/rhythm_session=([A-Za-z0-9_-]{43})/)?.[1]; if (value) store.db.prepare('DELETE FROM sessions WHERE hash=?').run(hash(value)); res.setHeader('Set-Cookie', 'rhythm_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0'); return json(res, 200, { ok: true }); }
       if (req.method === 'GET' && url.pathname === '/api/meta') {
         const rows = store.all(false); return json(res, 200, { fields: store.settings('field'), views: store.settings('view'), dashboards: store.settings('dashboard'), currencies: [...new Set(rows.map(row => row.currency).filter(Boolean))].sort(), categories: [...new Set(rows.map(row => row.category).filter(Boolean))].sort(), devices: store.db.prepare('SELECT id,label,created_at,last_seen,revoked FROM devices').all(), count: rows.length, conflicts: store.db.prepare('SELECT COUNT(*) count FROM conflicts WHERE resolved=0').get().count, url: 'http://' + host + ':' + port });
@@ -151,7 +159,7 @@ export function createFinanceServer({ directory = path.join(root, '.web'), allow
       if (!res.headersSent) json(res, error.status || 500, { error: error.status ? error.message : 'Не удалось обработать запрос.', details: error.details || null }); else res.end();
     }
   }
-  const server = http.createServer(handler); server.requestTimeout = 30000; server.headersTimeout = 10000;
+  const server = http.createServer(handler); server.requestTimeout = 120000; server.headersTimeout = 10000;
   return { server, store, host, close: () => new Promise(resolve => server.close(() => { store.close(); resolve(); })) };
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

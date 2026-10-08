@@ -9,6 +9,8 @@ import android.webkit.WebViewClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceError;
 import android.webkit.CookieManager;
+import android.webkit.WebChromeClient;
+import android.webkit.ValueCallback;
 import android.widget.LinearLayout;
 import android.widget.Button;
 import android.widget.TextView;
@@ -20,6 +22,7 @@ import java.nio.file.Files;
 public final class WebActivity extends Activity {
     private WebView web;
     private LinearLayout page;
+    private ValueCallback<Uri[]> fileCallback;
     @Override public void onCreate(Bundle state) {
         super.onCreate(state); page = new LinearLayout(this); page.setOrientation(LinearLayout.VERTICAL); page.setBackgroundColor(Color.WHITE); setContentView(page);
         getWindow().setStatusBarColor(Color.WHITE); getWindow().setNavigationBarColor(Color.WHITE); getWindow().getDecorView().setSystemUiVisibility(android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | android.view.View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
@@ -37,11 +40,22 @@ public final class WebActivity extends Activity {
     private void createWeb(String target) {
         if (isFinishing()) return;
         web = new WebView(this); page.addView(web, new LinearLayout.LayoutParams(-1, 0, 1));
-        web.getSettings().setJavaScriptEnabled(true); web.getSettings().setDomStorageEnabled(true); web.getSettings().setAllowFileAccess(false); web.getSettings().setAllowContentAccess(false); web.getSettings().setMixedContentMode(android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW); CookieManager.getInstance().setAcceptThirdPartyCookies(web, false);
+        web.getSettings().setJavaScriptEnabled(true); web.getSettings().setDomStorageEnabled(true); web.getSettings().setAllowFileAccess(false); web.getSettings().setAllowContentAccess(true); web.getSettings().setMixedContentMode(android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW); CookieManager.getInstance().setAcceptThirdPartyCookies(web, false);
         web.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) { return !SyncConfig.sameOrigin(SyncConfig.url(WebActivity.this), request.getUrl().toString()); }
             @Override public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
                 if (request.isForMainFrame()) Toast.makeText(WebActivity.this, "Нет связи с ПК. Локальные операции сохранены.", Toast.LENGTH_LONG).show();
+            }
+        });
+        web.setWebChromeClient(new WebChromeClient() {
+            @Override public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
+                if (!SyncConfig.sameOrigin(SyncConfig.url(WebActivity.this), view.getUrl())) return false;
+                if (fileCallback != null) fileCallback.onReceiveValue(null);
+                fileCallback = callback;
+                Intent choose = new Intent(Intent.ACTION_OPEN_DOCUMENT); choose.addCategory(Intent.CATEGORY_OPENABLE); choose.setType("application/pdf");
+                try { startActivityForResult(choose, 83); }
+                catch (Exception error) { fileCallback.onReceiveValue(null); fileCallback = null; Toast.makeText(WebActivity.this, "Не удалось открыть выбор PDF.", Toast.LENGTH_LONG).show(); }
+                return true;
             }
         });
         web.setDownloadListener((url, userAgent, disposition, mime, length) -> download(url)); web.loadUrl(target);
@@ -58,5 +72,12 @@ public final class WebActivity extends Activity {
         } catch (Exception error) { runOnUiThread(() -> Toast.makeText(this, "Не удалось скачать файл. Проверь связь с ПК.", Toast.LENGTH_LONG).show()); } }, "rhythm-download").start();
     }
     @Override public void onBackPressed() { if (web != null && web.canGoBack()) web.goBack(); else super.onBackPressed(); }
-    @Override public void onDestroy() { if (web != null) { page.removeView(web); web.destroy(); } super.onDestroy(); }
+    @Override protected void onActivityResult(int request, int result, Intent data) {
+        super.onActivityResult(request, result, data);
+        if (request == 83 && fileCallback != null) {
+            Uri selected = result == RESULT_OK && data != null ? data.getData() : null;
+            fileCallback.onReceiveValue(selected != null && "content".equals(selected.getScheme()) ? new Uri[] { selected } : null); fileCallback = null;
+        }
+    }
+    @Override public void onDestroy() { if (fileCallback != null) { fileCallback.onReceiveValue(null); fileCallback = null; } if (web != null) { page.removeView(web); web.destroy(); } super.onDestroy(); }
 }

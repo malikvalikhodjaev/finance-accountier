@@ -4,7 +4,7 @@ const names = { date: 'Дата', time: 'Время', merchant: 'Магазин 
 const kinds = { expense: 'Расход', income: 'Доход', transfer: 'Свои деньги', unknown: 'Уточнить' }, statuses = { recorded: 'Учтено', review: 'Уточнить', duplicate: 'Возможный повтор', ignored: 'Исключено' };
 const defaults = ['date', 'merchant', 'amount_minor', 'currency', 'kind', 'category', 'purpose', 'state'];
 const state = { meta: null, tab: new URL(location.href).searchParams.get('tab') === 'dashboard' ? 'dashboard' : 'table', filters: { period: 'all' }, columns: [...defaults], viewId: '', boardId: 'main', rows: [], total: 0, offset: 0, generation: 0 };
-let saveDialog, timer, tablePanel;
+let saveDialog, timer, tablePanel, dialogGeneration = 0;
 function el(tag, properties = {}, ...children) {
   const element = document.createElement(tag);
   for (const [key, value] of Object.entries(properties)) {
@@ -42,6 +42,7 @@ function today() { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tas
 function select(options, value = '') { const control = el('select'); for (const [key, label] of options) control.append(el('option', { value: key, text: label })); control.value = value; return control; }
 function field(label, control, full = false) { return el('label', { class: 'field' + (full ? ' full' : '') }, el('span', { text: label }), control); }
 function modal(title, body, callback, saveLabel = 'Сохранить') {
+  dialogGeneration++;
   content.replaceChildren(el('h2', { text: title }), body); dialogError.textContent = ''; document.querySelector('#dialog-save').textContent = saveLabel; document.querySelector('#dialog-save').hidden = !callback; saveDialog = callback; dialog.showModal();
 }
 document.querySelector('#dialog-cancel').onclick = () => dialog.close();
@@ -82,6 +83,34 @@ function filterForm(onChange) {
   return form;
 }
 function query(filters = state.filters) { return new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== '' && value != null)); }
+function importStatement() {
+  const file = el('input', { type: 'file', accept: 'application/pdf,.pdf', 'aria-label': 'PDF выписки Uzum Bank' });
+  const status = el('p', { class: 'subtle' });
+  modal('Импорт выписки', el('div', {}, el('p', { text: 'Uzum Bank: карта Uzum → Справки и выписки → Выписка по счёту → период → Английский. Сохрани PDF на телефон или компьютер и выбери его здесь.' }), file, status), null);
+  const generation = dialogGeneration;
+  file.onchange = async () => {
+    const source = file.files[0]; if (!source) return;
+    if (source.size > 5 * 1024 * 1024) { status.textContent = 'Выбери PDF до 5 МБ или выгрузи меньший период.'; return; }
+    file.disabled = true; status.textContent = 'Разбираю таблицу. Исходный файл сохраняется без изменений…';
+    try {
+      const data = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(',')[1]); reader.onerror = () => reject(new Error('Не удалось прочитать файл.')); reader.readAsDataURL(source); });
+      const preview = await api('/api/imports/preview', { method: 'POST', body: { filename: source.name, data } });
+      if (!dialog.open || generation !== dialogGeneration) return;
+      const info = el('div', {}, el('p', { text: preview.filename + ' · ' + preview.pages + ' стр. · ' + preview.period.from + ' — ' + preview.period.to }), el('p', { text: 'Всего: ' + preview.summary.total + '. Новых учтённых: ' + preview.summary.recorded + '. На проверку: ' + preview.summary.review + '. Возможных повторов: ' + preview.summary.duplicates + '. Уже в базе: ' + preview.summary.existing + '.' }), el('p', { class: 'subtle', text: preview.note }));
+      const body = el('tbody'), table = el('div', { class: 'table-wrap' }, el('table', {}, el('thead', {}, el('tr', {}, ...['Дата', 'Магазин / сервис', 'Сумма', 'Учёт'].map(text => el('th', { text })))), body));
+      let offset = 0;
+      const more = button('Показать ещё строки', () => addRows(), true);
+      function addRows() {
+        for (const row of preview.rows.slice(offset, offset + 50)) body.append(el('tr', {}, el('td', { text: row.date }), el('td', { class: 'text-cell', text: row.merchant }), el('td', { class: 'amount', text: money(row.amountMinor) + ' ' + row.currency }), el('td', { class: 'text-cell', text: row.existing ? 'Уже в базе' : (statuses[row.state] || row.state) + (row.reason ? ' · ' + row.reason : '') })));
+        offset += 50; more.hidden = offset >= preview.rows.length;
+      }
+      addRows(); info.append(table, more);
+      content.replaceChildren(el('h2', { text: 'Проверка выписки' }), info);
+      const save = document.querySelector('#dialog-save'); save.hidden = false; save.textContent = 'Добавить в общую базу';
+      saveDialog = async () => { const result = await api('/api/imports/' + preview.id + '/commit', { method: 'POST', body: {} }); await loadMeta(); await render(); message('Добавлено: ' + result.inserted + '. Уже были в базе: ' + result.skipped + '.'); };
+    } catch (error) { status.textContent = error.message; file.disabled = false; }
+  };
+}
 function name(key) { return names[key] || state.meta.fields.find(field => field.id === key)?.name || key; }
 async function render() {
   for (const b of document.querySelectorAll('[data-tab]')) b.classList.toggle('active', b.dataset.tab === state.tab);
@@ -91,7 +120,7 @@ async function render() {
 function renderTable() {
   const view = select([['', 'Текущее представление'], ...state.meta.views.map(item => [item.id, item.name])], state.viewId);
   view.onchange = () => { const item = state.meta.views.find(v => v.id === view.value); if (!item) return; state.viewId = item.id; state.filters = { ...item.filters }; state.columns = [...item.columns]; render(); };
-  const actions = el('div', { class: 'actions' }, button('Добавить операцию', () => editRow(null)), button('Своя колонка', addField, true), button('Колонки', chooseColumns, true), button('Сохранить вид', saveView, true), button('CSV', () => location.href = '/api/export?' + query(), true));
+  const actions = el('div', { class: 'actions' }, button('Добавить операцию', () => editRow(null)), button('Своя колонка', addField, true), button('Колонки', chooseColumns, true), button('Сохранить вид', saveView, true), button('CSV', () => location.href = '/api/export?' + query(), true), button('Импорт выписки', importStatement, true));
   const tools = button('Настроить таблицу', () => { const open = actions.classList.toggle('expanded'); tools.setAttribute('aria-expanded', String(open)); }, true); tools.classList.add('mobile-tools'); tools.setAttribute('aria-expanded', 'false'); actions.append(tools);
   app.append(el('div', { class: 'toolbar' }, el('div', { class: 'row' }, el('h1', { text: 'Операции' }), view), actions));
   if (state.meta.conflicts) app.append(button('Разобрать конфликты: ' + state.meta.conflicts, showConflicts, true));

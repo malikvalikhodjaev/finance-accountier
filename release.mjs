@@ -9,8 +9,9 @@ function privateFiles() {
   if (forbidden.length) throw new Error('Личные файлы попали в Git: ' + forbidden.join(', '));
 }
 function validate() {
-  for (const args of [['test.mjs'], ['--test', 'tests/workflow.test.mjs', 'tests/web.test.mjs']]) console.log(run(process.execPath, args));
+  for (const args of [['test.mjs'], ['--test', 'tests/workflow.test.mjs', 'tests/web.test.mjs', 'tests/imports.test.mjs']]) console.log(run(process.execPath, args));
   console.log(run('python', ['tests/migration.py']));
+  console.log(run('python', ['tests/imports_parser.py']));
 }
 function build() { console.log(run(process.execPath, ['build.mjs'])); }
 function taggedCommit(tag) {
