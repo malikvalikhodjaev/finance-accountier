@@ -1,5 +1,6 @@
 import { hash, fail, validDate, today } from './store.mjs';
 import { flowOf } from './flows.mjs';
+import { cancelledOrder } from './public/order-summary.mjs';
 
 export const services = { yandex_go: 'Яндекс Go', uzum_market: 'Uzum Market', uzum_tezkor: 'Uzum Tezkor', wildberries: 'Wildberries', paynet: 'Paynet', subscription: 'Подписки и сервисы' };
 const merchantPatterns = {
@@ -52,6 +53,7 @@ export function normaliseOrder(input, service, account) {
 }
 
 export function candidatePayments(order, events, relation = 'payment') {
+  if (relation === 'payment' && cancelledOrder(order)) return [];
   if (order.dateCertainty !== 'exact' || !order.date || !order.currency || /наличн|naqd|cash/i.test(order.paymentMethod)) return [];
   const amount = relation === 'refund' ? order.details.refundMinor : order.amountMinor;
   if (!(amount > 0) || !Number.isSafeInteger(amount)) return [];

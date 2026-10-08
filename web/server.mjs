@@ -10,7 +10,7 @@ import { cashflow } from './cashflow.mjs';
 import { createOrders, services } from './orders.mjs';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const assets = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'], '/icon.svg': ['icon.svg', 'image/svg+xml'] };
+const assets = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/order-summary.mjs': ['order-summary.mjs', 'text/javascript'], '/style.css': ['style.css', 'text/css'], '/icon.svg': ['icon.svg', 'image/svg+xml'] };
 const token = () => randomBytes(32).toString('base64url');
 const privateIP = ip => /^(?:10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.)/.test(ip);
 export function createFinanceServer({ directory = path.join(root, '.web'), allowLocalLogin = true, advertisedHost = null, port = 8788, importParser = null } = {}) {

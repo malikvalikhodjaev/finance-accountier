@@ -25,6 +25,8 @@ test('Совпадение суммы недостаточно: карта, ва
   assert.equal(candidatePayments(normalized, [event]).length, 1);
   for (const changed of [{ card_suffix: '9999' }, { currency: 'USD' }, { date: '2026-01-14' }, { state: 'duplicate' }, { kind: 'income' }, { merchant: 'OTHER STORE' }]) assert.equal(candidatePayments(normalized, [{ ...event, ...changed }]).length, 0);
   assert.equal(candidatePayments({ ...normalized, dateCertainty: 'inferred_year' }, [event]).length, 0); assert.equal(candidatePayments({ ...normalized, paymentMethod: 'Наличные' }, [event]).length, 0);
+  assert.equal(candidatePayments({ ...normalized, details: { cancelled: true } }, [event]).length, 0);
+  assert.equal(candidatePayments({ ...normalized, status: 'Отмена указана в истории' }, [event]).length, 0);
 });
 test('Связь подтверждается отдельно, проверяет версии, допускает отмену и сохраняет историю', () => {
   const store = createStore(':memory:'); try {

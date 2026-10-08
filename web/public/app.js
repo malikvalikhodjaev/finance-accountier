@@ -317,18 +317,29 @@ function newBoard() {
   modal('Новый дашборд', field('Название', label), async () => { const result = await api('/api/dashboards', { method: 'POST', body: { name: label.value, widgets: [] } }); state.boardId = result.id; await loadMeta(); render(); });
 }
 async function renderOrders() {
-  const generation = state.generation, result = await api('/api/orders');
+  const generation = state.generation, [result, reporting] = await Promise.all([api('/api/orders'), import('/order-summary.mjs')]);
+  const { summarizeOrders, categoryOf, orderCategories } = reporting;
   if (generation !== state.generation || state.tab !== 'orders') return;
   app.replaceChildren(el('div', { class: 'toolbar' }, el('h1', { text: 'Заказы и чеки' })), el('p', { class: 'subtle', text: 'Детали покупок дополняют банковские операции. Импорт заказа сам по себе не увеличивает расходы: связь с оплатой подтверждается отдельно.' }));
   const service = select([['', 'Все сервисы'], ...Object.entries(result.services)], state.orderService || ''); service.setAttribute('aria-label', 'Сервис заказов');
+  const category = select([['', 'Все заказы'], ...Object.entries(orderCategories)], state.orderCategory || ''); category.setAttribute('aria-label', 'Категория заказов');
+  const from = el('input', { type: 'date', value: state.orderFrom || '', 'aria-label': 'Заказы с даты' }), to = el('input', { type: 'date', value: state.orderTo || '', 'aria-label': 'Заказы по дату' });
   const search = el('input', { type: 'search', 'aria-label': 'Поиск в заказах', value: state.orderSearch || '' }), sources = el('div', { class: 'order-sources' }), list = el('section', { 'aria-label': 'Список заказов' });
   for (const source of result.sources) sources.append(el('div', { class: 'widget' }, el('h2', { text: result.services[source.service] + ' · ' + source.count + ' записей' }), el('p', { text: source.coverageNote })));
   if (!result.sources.length) sources.append(el('p', { text: 'История заказов пока не загружена.' }));
   function draw() {
-    state.orderService = service.value; state.orderSearch = search.value;
-    const rows = result.rows.filter(row => (!service.value || row.service === service.value) && [row.title, row.rawText].join(' ').toLocaleLowerCase('ru').includes(search.value.toLocaleLowerCase('ru'))), body = el('tbody');
+    state.orderService = service.value; state.orderSearch = search.value; state.orderCategory = category.value; state.orderFrom = from.value; state.orderTo = to.value;
+    const rows = result.rows.filter(row => (!service.value || row.service === service.value) && (!category.value || categoryOf(row) === category.value) && (!from.value || row.date && row.date >= from.value) && (!to.value || row.date && row.date <= to.value) && [row.title, row.rawText].join(' ').toLocaleLowerCase('ru').includes(search.value.toLocaleLowerCase('ru'))), body = el('tbody'), report = summarizeOrders(rows);
+    const overview = el('section', { 'aria-label': 'Суммы заказов по категориям' }, el('h2', { text: 'Еда и такси по истории заказов' }), el('p', { class: 'subtle', text: 'Суммы из истории без отменённых заказов. Оплата, возвраты и способ оплаты уточняются по чекам и банковским записям. Эти суммы не прибавляются к расходам дашборда.' }));
+    for (const total of report.totals) {
+      const monthRows = report.months.filter(row => row.category === total.category && row.currency === total.currency), max = monthRows.reduce((value, row) => BigInt(row.amountMinor) > value ? BigInt(row.amountMinor) : value, 1n);
+      const monthly = el('details', {}, el('summary', { text: 'По месяцам · ' + monthRows.length })), monthBody = el('tbody');
+      for (const month of monthRows) monthBody.append(el('tr', {}, el('td', { text: month.month }), el('td', { text: String(month.count) }), el('td', { class: 'amount', text: money(month.amountMinor) + ' ' + month.currency }), el('td', {}, el('div', { class: 'order-month-bar', style: 'width:' + Number(BigInt(month.amountMinor) * 10000n / max) / 100 + '%', 'aria-hidden': 'true' }))));
+      monthly.append(el('div', { class: 'table-wrap' }, el('table', {}, el('thead', {}, el('tr', {}, ...['Месяц', 'Заказы', 'Сумма', 'Сравнение'].map(text => el('th', { text })))), monthBody)));
+      overview.append(el('div', { class: 'widget' }, el('h2', { text: orderCategories[total.category] + ' · ' + total.currency }), el('p', { class: 'metric', text: money(total.amountMinor) }), el('p', { text: total.count + ' заказов · ' + (total.from || 'Нет даты') + ' — ' + (total.to || 'Нет даты') }), el('p', { class: 'subtle', text: 'Отменено: ' + total.cancelledCount + '. Год предположен: ' + total.inferredYearCount + '. Без даты: ' + total.unknownDateCount + '.' }), monthly));
+    }
     const wrap = el('div', { class: 'table-wrap' }, el('table', {}, el('thead', {}, el('tr', {}, ...['Дата', 'Сервис / заказ', 'Сумма заказа', 'Статус', 'Связь с оплатой', 'Детали'].map(text => el('th', { text })))), body));
-    list.replaceChildren(el('p', { class: 'subtle', text: 'Найдено: ' + rows.length }), wrap);
+    list.replaceChildren(overview, el('p', { class: 'subtle', text: 'Найдено: ' + rows.length }), wrap);
     let offset = 0; const more = button('Показать ещё заказы', () => add(), true);
     function add() {
       for (const row of rows.slice(offset, offset + 100)) body.append(el('tr', {}, el('td', { class: 'text-cell', text: (row.date || row.dateLabel || 'Дата неизвестна') + (row.time ? ' ' + row.time : '') + (row.dateCertainty === 'inferred_year' ? ' · год предположен' : '') }), el('td', { class: 'text-cell', text: result.services[row.service] + ' · ' + row.title }), el('td', { class: 'amount', text: money(row.amountMinor) + ' ' + (row.currency || '') }), el('td', { class: 'text-cell', text: row.status || 'Не указан' }), el('td', { class: 'text-cell', text: row.links.length ? row.links.some(link => link.needsReview) ? 'Перепроверить связь' : 'Связано' : 'Не сопоставлено' }), el('td', {}, button('Детали заказа', () => showOrder(row.id), true))));
@@ -336,12 +347,13 @@ async function renderOrders() {
     }
     add(); list.append(more);
   }
-  service.onchange = draw; search.oninput = draw; app.append(el('div', { class: 'filters' }, field('Сервис', service), field('Поиск', search)), sources, list); draw();
+  service.onchange = draw; category.onchange = draw; from.onchange = draw; to.onchange = draw; search.oninput = draw;
+  app.append(el('div', { class: 'filters' }, field('Сервис', service), field('Категория', category), field('С даты', from), field('По дату', to), field('Поиск', search)), list, el('details', {}, el('summary', { text: 'Источники и охват · ' + result.sources.length }), sources)); draw();
 }
 async function showOrder(id) {
   const detail = await api('/api/orders/' + id), row = detail.row, wrapper = el('div', {}, el('p', { text: (row.date || row.dateLabel || 'Дата неизвестна') + ' ' + (row.time || '') + ' · ' + (row.dateCertainty === 'inferred_year' ? 'год определён по текущей истории, нужно подтвердить' : row.dateCertainty === 'unknown' ? 'дата не подтверждена' : 'дата подтверждена') }), el('p', { class: 'metric', text: money(row.amountMinor) + ' ' + (row.currency || '') }), el('p', { text: row.status || 'Статус не указан' }), el('p', { text: 'Оплата: ' + (row.paymentMethod || 'не указана') + (row.cardSuffix ? ' · карта ' + row.cardSuffix : '') }));
-  const detailNames = { from: 'Откуда', to: 'Куда', receiptNumber: 'Номер чека', receiptIssuedAt: 'Чек выдан', plusPoints: 'Баллы Плюса', paidMinor: 'Оплачено', refundMinor: 'Возвращено', deliveryMinor: 'Доставка', discountMinor: 'Скидка' };
-  for (const [key, value] of Object.entries(row.details)) wrapper.append(el('p', { text: (detailNames[key] || key) + ': ' + (key.endsWith('Minor') ? money(value) + ' ' + row.currency : value) }));
+  const detailNames = { from: 'Откуда', to: 'Куда', route: 'Адрес / маршрут', category: 'Категория заказа', cancelled: 'Отменён', receiptNumber: 'Номер чека', receiptIssuedAt: 'Чек выдан', plusPoints: 'Баллы Плюса', paidMinor: 'Оплачено', refundMinor: 'Возвращено', deliveryMinor: 'Доставка', discountMinor: 'Скидка' };
+  for (const [key, value] of Object.entries(row.details)) wrapper.append(el('p', { text: (detailNames[key] || key) + ': ' + (key.endsWith('Minor') ? money(value) + ' ' + row.currency : key === 'category' ? ({ food: 'Еда', taxi: 'Такси', other: 'Другие заказы' }[value] || value) : typeof value === 'boolean' ? value ? 'Да' : 'Нет' : value) }));
   if (row.items.length) wrapper.append(el('ul', {}, ...row.items.map(item => el('li', { text: item.name + (item.quantity ? ' × ' + item.quantity : '') + (item.amountMinor != null ? ' · ' + money(item.amountMinor) + ' ' + row.currency : '') }))));
   if (row.details.plusPoints) wrapper.append(el('p', { class: 'subtle', text: 'Баллы Плюса не учитываются как денежный доход.' }));
   wrapper.append(el('h2', { text: 'Банковские операции' }));
