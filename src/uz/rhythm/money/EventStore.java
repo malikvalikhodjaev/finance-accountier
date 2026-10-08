@@ -124,8 +124,14 @@ public final class EventStore extends SQLiteOpenHelper {
         }
     }
     public JSONObject statistics() {
-        String question = "purpose = '' AND ((state='recorded' AND kind='expense') OR (state='review' AND kind='unknown' AND (LOWER(bank_operation)='platezh' OR LOWER(bank_operation) LIKE 'spisanie %')))";
-        try (Cursor c = getReadableDatabase().rawQuery("SELECT COUNT(*) total, COALESCE(SUM(state='review'),0) review, COALESCE(SUM(state='duplicate'),0) duplicates, COALESCE(SUM(state='recorded' AND kind='expense' AND category='Без категории'),0) categories, COALESCE(SUM(" + question + "),0) unanswered FROM events", null)) { c.moveToFirst(); return row(c); }
+        JSONObject result;
+        try (Cursor c = getReadableDatabase().rawQuery("SELECT COUNT(*) total, COALESCE(SUM(state='review'),0) review, COALESCE(SUM(state='duplicate'),0) duplicates, COALESCE(SUM(state='recorded' AND kind='expense' AND category='Без категории'),0) categories FROM events", null)) { c.moveToFirst(); result = row(c); }
+        int unanswered = 0;
+        try (Cursor c = getReadableDatabase().query("events", new String[]{"state", "kind", "bank_operation", "purpose"}, "amount_minor IS NOT NULL AND state IN ('recorded','review')", null, null, null, null)) {
+            while (c.moveToNext()) if (PurposeRules.needsAnswer(c.getString(0), c.getString(1), c.getString(2), c.getString(3))) unanswered++;
+        }
+        try { result.put("unanswered", unanswered); } catch (org.json.JSONException error) { throw new IllegalStateException(error); }
+        return result;
     }
     public List<JSONObject> recent(String first, boolean ignored) {
         List<JSONObject> result = new ArrayList<>();

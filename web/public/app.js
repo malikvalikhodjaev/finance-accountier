@@ -4,7 +4,8 @@ const names = { date: 'Дата', time: 'Время', merchant: 'Магазин 
 const kinds = { expense: 'Расход', income: 'Доход', transfer: 'Свои деньги', unknown: 'Уточнить' }, statuses = { recorded: 'Учтено', review: 'Уточнить', duplicate: 'Возможный повтор', ignored: 'Исключено' };
 const flows = { incoming: 'Поступление', outgoing: 'Списание', unknown: 'Не определено' };
 const defaults = ['date', 'merchant', 'amount_minor', 'currency', 'kind', 'category', 'purpose', 'state'];
-const state = { meta: null, tab: new URL(location.href).searchParams.get('tab') === 'dashboard' ? 'dashboard' : 'table', filters: { period: 'all' }, columns: [...defaults], viewId: '', boardId: 'main', rows: [], total: 0, offset: 0, generation: 0 };
+const initialTab = new URL(location.href).searchParams.get('tab');
+const state = { meta: null, tab: ['table', 'orders'].includes(initialTab) ? initialTab : 'dashboard', filters: { period: 'all' }, columns: [...defaults], viewId: '', boardId: 'main', chartGroup: 'month', chartCurrency: '', rows: [], total: 0, offset: 0, generation: 0 };
 let saveDialog, timer, tablePanel, dialogGeneration = 0;
 function el(tag, properties = {}, ...children) {
   const element = document.createElement(tag);
@@ -131,7 +132,7 @@ function name(key) { return names[key] || state.meta.fields.find(field => field.
 async function render() {
   for (const b of document.querySelectorAll('[data-tab]')) b.classList.toggle('active', b.dataset.tab === state.tab);
   app.replaceChildren(); state.generation++;
-  if (state.tab === 'table') renderTable(); else renderDashboard();
+  if (state.tab === 'table') renderTable(); else if (state.tab === 'orders') renderOrders().catch(error => message(error.message)); else renderDashboard();
 }
 function renderTable() {
   const view = select([['', 'Текущее представление'], ...state.meta.views.map(item => [item.id, item.name])], state.viewId);
@@ -188,6 +189,7 @@ async function editRow(id, preset = {}) {
     customControls[item.id] = control; form.append(field(item.name, control));
   }
   const wrapper = el('div', {}, form);
+  if (detail?.orders?.length) wrapper.append(el('details', {}, el('summary', { text: 'Детали из заказов: ' + detail.orders.length }), ...detail.orders.map(order => button(order.title + (order.needsReview ? ' · связь требует проверки' : ''), () => { dialog.close(); return showOrder(order.id); }, true))));
   if (row.raw_text) wrapper.append(el('details', {}, el('summary', { text: 'Исходное банковское сообщение' }), el('pre', { text: row.raw_text })));
   if (detail?.history.length) wrapper.append(el('details', {}, el('summary', { text: 'История изменений: ' + detail.history.length }), ...detail.history.map(item => { const previous = JSON.parse(item.data); return el('p', { class: 'subtle', text: new Date(item.at).toLocaleString('ru-RU') + ' · ' + (item.actor === 'web' ? 'Веб' : 'Телефон / синхронизация') + ' · ' + money(previous.amount_minor) + ' ' + (previous.currency || '') + ' · ' + (previous.category || '') + ' · ' + (previous.purpose || '') }); })));
   modal(id ? 'Исправить операцию' : 'Добавить операцию', wrapper, async () => {
@@ -231,14 +233,18 @@ function renderDashboard() {
   const board = state.meta.dashboards.find(board => board.id === state.boardId) || state.meta.dashboards[0]; state.boardId = board.id;
   const selectBoard = select(state.meta.dashboards.map(item => [item.id, item.name]), state.boardId); selectBoard.onchange = () => { state.boardId = selectBoard.value; render(); };
   app.append(el('div', { class: 'toolbar' }, el('div', { class: 'row' }, el('h1', { text: 'Дашборды' }), selectBoard), el('div', { class: 'actions' }, button('Добавить доход', () => editRow(null, { kind: 'income', category: 'Доход' }), true), button('Добавить виджет', () => editWidget(null)), button('Новый дашборд', newBoard, true))));
-  let results = el('div', { class: 'boards' });
+  let results = el('div', { class: 'boards' }), chart = el('section', { class: 'cashflow widget', 'aria-label': 'График доходов и расходов' }), request = 0;
+  const group = select([['day', 'По дням'], ['week', 'По неделям'], ['month', 'По месяцам']], state.chartGroup); group.setAttribute('aria-label', 'Разбивка графика');
+  group.onchange = () => { state.chartGroup = group.value; load().catch(error => message(error.message)); };
   const load = async () => {
-    const generation = state.generation, params = query(); params.set('id', state.boardId); const response = await api('/api/dashboard?' + params);
-    if (generation !== state.generation || state.tab !== 'dashboard') return;
+    const generation = state.generation, currentRequest = ++request, params = query(); params.set('id', state.boardId); params.set('group', state.chartGroup);
+    const [response, series] = await Promise.all([api('/api/dashboard?' + params), api('/api/cashflow?' + params)]);
+    if (generation !== state.generation || currentRequest !== request || state.tab !== 'dashboard') return;
+    drawCashflow(chart, series, group);
     results.replaceChildren();
     for (const widget of response.widgets) {
       const card = el('section', { class: 'widget' }, el('h2', {}, el('span', { text: widget.name }), button('Настроить', () => editWidget(widget.id), true)));
-      if (widget.metric === 'incoming') card.append(el('p', { class: 'subtle', text: 'Пополнения, возвраты и переводы на свои карты. Назначение поступлений можно уточнить отдельно.' }), button('Посмотреть поступления', () => { state.filters = { ...state.filters, flow: 'incoming' }; state.tab = 'table'; if (!state.columns.includes('flow')) state.columns.push('flow'); history.replaceState(null, '', '/'); render(); }, true));
+      if (widget.metric === 'incoming') card.append(el('p', { class: 'subtle', text: 'Пополнения, возвраты и переводы на свои карты. Назначение поступлений можно уточнить отдельно.' }), button('Посмотреть поступления', () => { state.filters = { ...state.filters, flow: 'incoming' }; state.tab = 'table'; if (!state.columns.includes('flow')) state.columns.push('flow'); history.replaceState(null, '', '/?tab=table'); render(); }, true));
       if (!widget.data.length) card.append(el('p', { class: 'subtle', text: widget.metric === 'incoming' ? 'За этот период поступления с известной суммой не найдены в загруженных данных.' : 'Нет учтённых операций за этот период.' }));
       for (const item of widget.data) {
         const block = el('div', { class: 'currency-block' }, el('div', { class: 'metric' }, widget.metric === 'count' ? String(item.count) : money(item.amountMinor), el('small', { text: widget.metric === 'count' ? ' операций · ' + item.currency : ' ' + item.currency })));
@@ -254,11 +260,98 @@ function renderDashboard() {
     }
     if (!response.widgets.length) results.append(el('div', { class: 'widget empty' }, el('h2', { text: 'Добавь первый виджет' }), el('p', { text: 'Выбери сумму или количество, разрез и валюту.' })));
   };
-  app.append(filterForm(() => load().catch(error => message(error.message))), results); state.refreshBoard = load; load().catch(error => results.replaceChildren(el('p', { text: error.message })));
+  app.append(filterForm(() => load().catch(error => message(error.message))), chart, results); state.refreshBoard = load; load().catch(error => chart.replaceChildren(el('p', { text: error.message })));
+}
+function svgEl(tag, attributes = {}, ...children) {
+  const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, value);
+  for (const child of children) node.append(child instanceof Node ? child : document.createTextNode(String(child)));
+  return node;
+}
+function drawCashflow(panel, series, group) {
+  const preferredCurrency = state.chartCurrency || state.filters.currency || (series.currencies.some(item => item.currency === 'UZS') ? 'UZS' : series.currencies[0]?.currency || '');
+  const currency = select(series.currencies.map(item => [item.currency, item.currency]), preferredCurrency); currency.setAttribute('aria-label', 'Валюта графика');
+  if (!series.currencies.some(item => item.currency === currency.value)) currency.value = series.currencies[0]?.currency || '';
+  state.chartCurrency = currency.value; currency.onchange = () => { state.chartCurrency = currency.value; drawCashflow(panel, series, group); };
+  panel.replaceChildren(el('div', { class: 'chart-heading' }, el('div', {}, el('h2', { text: 'Доходы и расходы во времени' }), el('p', { class: 'subtle', text: 'По загруженным операциям. Доходы и расходы включают только учтённые записи. Валюты считаются отдельно.' })), el('div', { class: 'row' }, group, currency)));
+  if (series.adjusted) panel.append(el('p', { class: 'subtle', text: 'Для длинной истории показаны месяцы. Выбери меньший период, чтобы увидеть дни или недели.' }));
+  const item = series.currencies.find(item => item.currency === currency.value);
+  if (!item?.points.length) { panel.append(el('p', { text: 'За этот период нет загруженных операций с датой и валютой.' })); return; }
+  const metrics = [['income', 'Подтверждённые доходы', '#16735b'], ['expense', 'Расходы', '#bd4829'], ['incoming', 'Все поступления на карты', '#4864b8']], enabled = { income: state.chartIncome !== false, expense: state.chartExpense !== false, incoming: state.chartIncoming === true };
+  const summary = el('div', { class: 'chart-totals' }), legend = el('div', { class: 'chart-legend' });
+  for (const [key, name, color] of metrics) {
+    summary.append(el('div', { class: 'chart-total ' + key }, el('span', { text: name }), el('strong', { text: money(item.totals[key + 'Minor']) + ' ' + item.currency }), el('small', { text: item.totals[key + 'Count'] + ' операций' })));
+    const check = el('input', { type: 'checkbox', checked: enabled[key] }); check.onchange = () => { enabled[key] = check.checked; state['chart' + key[0].toUpperCase() + key.slice(1)] = check.checked; paint(); };
+    legend.append(el('label', { class: key }, check, name));
+  }
+  const warning = el('p', { class: 'subtle', text: 'Все поступления включают возвраты и переводы на свои карты. Они могут повторяться в разных источниках. На уточнении: ' + item.totals.reviewCount + ' записей. Пустые интервалы означают отсутствие загруженных записей; это не доказывает отсутствие трат.' });
+  const graph = el('div', { class: 'chart-scroll' }), details = el('div', { class: 'chart-period', role: 'status' });
+  const previousPeriod = item.points.findIndex(point => point.from === state.chartPeriod), period = select(item.points.map((point, index) => [String(index), point.label]), String(previousPeriod >= 0 ? previousPeriod : item.points.length - 1)); period.setAttribute('aria-label', 'Период графика');
+  const show = index => {
+    const point = item.points[index]; period.value = String(index); state.chartPeriod = point.from;
+    details.replaceChildren(el('strong', { text: point.from + ' — ' + point.to }), el('div', { class: 'row' }, ...metrics.map(([key, name]) => el('span', { class: key, text: name + ': ' + money(point[key + 'Minor']) + ' ' + item.currency }))), el('span', { class: 'subtle', text: 'Загружено: ' + point.loadedCount + ' · На уточнении: ' + point.reviewCount }), button('Операции периода', () => {
+      state.filters = { ...state.filters, period: 'all', from: point.from, to: point.to, currency: item.currency }; state.tab = 'table'; history.replaceState(null, '', '/?tab=table'); render();
+    }, true));
+  };
+  period.onchange = () => show(Number(period.value));
+  function paint() {
+    const visible = metrics.filter(([key]) => enabled[key]);
+    let max = 1n; for (const point of item.points) for (const [key] of visible) if (BigInt(point[key + 'Minor']) > max) max = BigInt(point[key + 'Minor']);
+    const height = value => Number(BigInt(value) * 23000n / max) / 100, svg = svgEl('svg', { viewBox: '0 0 940 320', role: 'group', 'aria-label': 'Доходы и расходы. Выбери столбцы или период под графиком.' }, svgEl('title', {}, 'Доходы и расходы: ' + item.currency));
+    for (let step = 0; step <= 4; step++) { const y = 260 - step * 57.5; svg.append(svgEl('line', { x1: 110, x2: 925, y1: y, y2: y, class: 'chart-grid' }), svgEl('text', { x: 102, y: y + 4, 'text-anchor': 'end', class: 'chart-axis' }, money(max * BigInt(step) / 4n))); }
+    const width = 815 / item.points.length, stride = Math.max(1, Math.ceil(item.points.length / 7));
+    item.points.forEach((point, index) => {
+      const x = 110 + width * index, label = point.label + ': ' + metrics.map(([key, name]) => name + ' ' + money(point[key + 'Minor']) + ' ' + item.currency).join('; '), area = svgEl('g', { role: 'button', tabindex: '0', 'aria-label': label, class: 'chart-hit' }, svgEl('title', {}, label));
+      area.append(svgEl('rect', { x, y: 25, width: Math.max(.5, width), height: 240, fill: 'transparent' }));
+      visible.forEach(([key, , color], metricIndex) => { const h = height(point[key + 'Minor']); area.append(svgEl('rect', { x: x + width * .12 + metricIndex * width * .76 / visible.length, y: 260 - h, width: Math.max(.4, width * .7 / visible.length), height: h, fill: color, 'pointer-events': 'none' })); });
+      if (!point.loadedCount) area.append(svgEl('line', { x1: x + 1, x2: x + width - 1, y1: 264, y2: 264, class: 'chart-gap' }));
+      area.addEventListener('click', () => show(index)); area.addEventListener('keydown', event => { if (['Enter', ' '].includes(event.key)) { event.preventDefault(); show(index); } }); svg.append(area);
+      if (index % stride === 0 || index === item.points.length - 1) svg.append(svgEl('text', { x: x + width / 2, y: 287, 'text-anchor': 'middle', class: 'chart-axis' }, point.label));
+    });
+    graph.replaceChildren(svg);
+  }
+  panel.append(summary, legend, graph, el('label', { class: 'row' }, 'Период:', period), details, warning); paint(); show(Number(period.value));
 }
 function newBoard() {
   const label = el('input', { value: 'Мой дашборд', required: true, maxlength: '80' });
   modal('Новый дашборд', field('Название', label), async () => { const result = await api('/api/dashboards', { method: 'POST', body: { name: label.value, widgets: [] } }); state.boardId = result.id; await loadMeta(); render(); });
+}
+async function renderOrders() {
+  const generation = state.generation, result = await api('/api/orders');
+  if (generation !== state.generation || state.tab !== 'orders') return;
+  app.replaceChildren(el('div', { class: 'toolbar' }, el('h1', { text: 'Заказы и чеки' })), el('p', { class: 'subtle', text: 'Детали покупок дополняют банковские операции. Импорт заказа сам по себе не увеличивает расходы: связь с оплатой подтверждается отдельно.' }));
+  const service = select([['', 'Все сервисы'], ...Object.entries(result.services)], state.orderService || ''); service.setAttribute('aria-label', 'Сервис заказов');
+  const search = el('input', { type: 'search', 'aria-label': 'Поиск в заказах', value: state.orderSearch || '' }), sources = el('div', { class: 'order-sources' }), list = el('section', { 'aria-label': 'Список заказов' });
+  for (const source of result.sources) sources.append(el('div', { class: 'widget' }, el('h2', { text: result.services[source.service] + ' · ' + source.count + ' записей' }), el('p', { text: source.coverageNote })));
+  if (!result.sources.length) sources.append(el('p', { text: 'История заказов пока не загружена.' }));
+  function draw() {
+    state.orderService = service.value; state.orderSearch = search.value;
+    const rows = result.rows.filter(row => (!service.value || row.service === service.value) && [row.title, row.rawText].join(' ').toLocaleLowerCase('ru').includes(search.value.toLocaleLowerCase('ru'))), body = el('tbody');
+    const wrap = el('div', { class: 'table-wrap' }, el('table', {}, el('thead', {}, el('tr', {}, ...['Дата', 'Сервис / заказ', 'Сумма заказа', 'Статус', 'Связь с оплатой', 'Детали'].map(text => el('th', { text })))), body));
+    list.replaceChildren(el('p', { class: 'subtle', text: 'Найдено: ' + rows.length }), wrap);
+    let offset = 0; const more = button('Показать ещё заказы', () => add(), true);
+    function add() {
+      for (const row of rows.slice(offset, offset + 100)) body.append(el('tr', {}, el('td', { class: 'text-cell', text: (row.date || row.dateLabel || 'Дата неизвестна') + (row.time ? ' ' + row.time : '') + (row.dateCertainty === 'inferred_year' ? ' · год предположен' : '') }), el('td', { class: 'text-cell', text: result.services[row.service] + ' · ' + row.title }), el('td', { class: 'amount', text: money(row.amountMinor) + ' ' + (row.currency || '') }), el('td', { class: 'text-cell', text: row.status || 'Не указан' }), el('td', { class: 'text-cell', text: row.links.length ? row.links.some(link => link.needsReview) ? 'Перепроверить связь' : 'Связано' : 'Не сопоставлено' }), el('td', {}, button('Детали заказа', () => showOrder(row.id), true))));
+      offset += 100; more.hidden = offset >= rows.length;
+    }
+    add(); list.append(more);
+  }
+  service.onchange = draw; search.oninput = draw; app.append(el('div', { class: 'filters' }, field('Сервис', service), field('Поиск', search)), sources, list); draw();
+}
+async function showOrder(id) {
+  const detail = await api('/api/orders/' + id), row = detail.row, wrapper = el('div', {}, el('p', { text: (row.date || row.dateLabel || 'Дата неизвестна') + ' ' + (row.time || '') + ' · ' + (row.dateCertainty === 'inferred_year' ? 'год определён по текущей истории, нужно подтвердить' : row.dateCertainty === 'unknown' ? 'дата не подтверждена' : 'дата подтверждена') }), el('p', { class: 'metric', text: money(row.amountMinor) + ' ' + (row.currency || '') }), el('p', { text: row.status || 'Статус не указан' }), el('p', { text: 'Оплата: ' + (row.paymentMethod || 'не указана') + (row.cardSuffix ? ' · карта ' + row.cardSuffix : '') }));
+  const detailNames = { from: 'Откуда', to: 'Куда', receiptNumber: 'Номер чека', receiptIssuedAt: 'Чек выдан', plusPoints: 'Баллы Плюса', paidMinor: 'Оплачено', refundMinor: 'Возвращено', deliveryMinor: 'Доставка', discountMinor: 'Скидка' };
+  for (const [key, value] of Object.entries(row.details)) wrapper.append(el('p', { text: (detailNames[key] || key) + ': ' + (key.endsWith('Minor') ? money(value) + ' ' + row.currency : value) }));
+  if (row.items.length) wrapper.append(el('ul', {}, ...row.items.map(item => el('li', { text: item.name + (item.quantity ? ' × ' + item.quantity : '') + (item.amountMinor != null ? ' · ' + money(item.amountMinor) + ' ' + row.currency : '') }))));
+  if (row.details.plusPoints) wrapper.append(el('p', { class: 'subtle', text: 'Баллы Плюса не учитываются как денежный доход.' }));
+  wrapper.append(el('h2', { text: 'Банковские операции' }));
+  for (const link of detail.links) wrapper.append(el('div', { class: 'conflict-card' }, el('p', { text: (link.relation === 'refund' ? 'Возврат' : 'Оплата') + ': ' + link.event.date + ' · ' + (link.event.merchant || '') + ' · ' + money(link.event.amount_minor) + ' ' + link.event.currency + (link.needsReview ? ' · запись изменилась, проверь связь' : '') }), button('Открыть банковскую запись', () => { dialog.close(); return editRow(link.event_id); }, true), button('Убрать связь', async () => { await api('/api/orders/' + id + '/link', { method: 'POST', body: { eventId: link.event_id, relation: link.relation, active: false, expectedOrderVersion: row.version, expectedEventVersion: link.event.version } }); dialog.close(); await showOrder(id); }, true)));
+  const candidates = [...detail.candidates, ...detail.refunds].filter(candidate => !detail.links.some(link => link.event_id === candidate.id && link.relation === candidate.relation));
+  if (!detail.links.length && !candidates.length) wrapper.append(el('p', { class: 'subtle', text: 'Подходящая банковская запись пока не найдена. Расходы не изменены.' }));
+  for (const candidate of candidates) wrapper.append(el('div', { class: 'conflict-card' }, el('p', { text: 'Возможное совпадение: ' + candidate.date + ' · ' + candidate.merchant + ' · ' + money(candidate.amount_minor) + ' ' + candidate.currency }), el('p', { class: 'subtle', text: candidate.reasons.join('. ') + '. Проверь, что это та же операция.' }), button(candidate.relation === 'refund' ? 'Подтвердить связь с возвратом' : 'Подтвердить связь с оплатой', async () => { await api('/api/orders/' + id + '/link', { method: 'POST', body: { eventId: candidate.id, relation: candidate.relation, active: true, expectedOrderVersion: row.version, expectedEventVersion: candidate.version } }); dialog.close(); await showOrder(id); })));
+  wrapper.append(el('details', {}, el('summary', { text: 'Исходная запись' }), el('pre', { text: row.rawText })));
+  for (const observation of detail.observations) wrapper.append(el('details', {}, el('summary', { text: 'Источник и охват истории' }), el('p', { text: observation.source.coverageNote }), ...observation.source.artifacts.map((artifact, index) => el('p', {}, el('a', { href: '/api/order-files/' + observation.batchId + '/' + index, target: '_blank', rel: 'noopener', text: artifact.name })))));
+  modal(row.title, wrapper, null);
 }
 function editWidget(id) {
   const board = state.meta.dashboards.find(board => board.id === state.boardId), widget = board.widgets.find(widget => widget.id === id) || { name: 'Мои расходы', metric: 'expense', group: 'category', currency: '', viewId: '' };
@@ -289,8 +382,8 @@ function login() {
   form.onsubmit = async event => { event.preventDefault(); try { await api('/api/login', { method: 'POST', body: { password: password.value } }); await loadMeta(); await render(); await resumeStatementImport(); } catch (problem) { error.textContent = problem.message; } };
   app.replaceChildren(el('section', { class: 'login' }, el('h1', { text: 'Войти в Ритм · деньги' }), el('p', { text: 'На основном компьютере открой 127.0.0.1:8788. Телефон подключается кодом из окна «Подключение».' }), form));
 }
-for (const item of document.querySelectorAll('[data-tab]')) item.onclick = () => { if (!state.meta) return; state.tab = item.dataset.tab; history.replaceState(null, '', state.tab === 'table' ? '/' : '/?tab=dashboard'); render(); };
+for (const item of document.querySelectorAll('[data-tab]')) item.onclick = () => { if (!state.meta) return; state.tab = item.dataset.tab; history.replaceState(null, '', '/?tab=' + state.tab); render(); };
 document.querySelector('#connect').onclick = () => state.meta ? connection() : login();
 async function start() { try { await loadMeta(); await render(); await resumeStatementImport(); } catch (error) { if (error.status === 401) login(); else app.replaceChildren(el('p', { text: 'Компьютер недоступен: ' + error.message }), button('Повторить', start)); } }
 start();
-setInterval(async () => { if (!state.meta || dialog.open || document.hidden) return; try { await loadMeta(); if (state.tab === 'table') await loadRows(false); else if (state.refreshBoard) await state.refreshBoard(); } catch (error) { if (error.status === 401) { state.meta = null; login(); } } }, 20000);
+setInterval(async () => { if (!state.meta || dialog.open || document.hidden) return; try { await loadMeta(); if (state.tab === 'table') await loadRows(false); else if (state.tab === 'dashboard' && state.refreshBoard) await state.refreshBoard(); } catch (error) { if (error.status === 401) { state.meta = null; login(); } } }, 20000);

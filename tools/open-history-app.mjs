@@ -1,0 +1,11 @@
+import { adb, resolvePhone } from '../phone.mjs';
+const packages = { yandex_go: 'ru.yandex.taxi', uzum_market: 'uz.uzum.app', uzum_tezkor: 'uz.uzum.tezkor', wildberries: 'com.wildberries.ru', paynet: 'uz.paynet.app' };
+const service = process.argv[2];
+if (!packages[service]) throw new Error('Укажи один из сервисов истории заказов.');
+const endpoint = resolvePhone();
+const allowed = [...Object.values(packages), 'uz.rhythm.money', 'com.miui.home', 'com.android.settings', 'com.android.intentresolver'];
+const top = adb(['shell', 'dumpsys', 'activity', 'activities'], endpoint).split(/\r?\n/).find(line => /topResumedActivity|mResumedActivity/.test(line));
+if (!allowed.some(name => top?.includes(name + '/'))) throw new Error('Сейчас открыт банковский, посторонний или заблокированный экран. Переключение остановлено; открой сервис истории сам.');
+const component = adb(['shell', 'cmd', 'package', 'resolve-activity', '--brief', '-a', 'android.intent.action.MAIN', '-c', 'android.intent.category.LAUNCHER', packages[service]], endpoint).trim().split(/\r?\n/).at(-1);
+if (!component?.startsWith(packages[service] + '/')) throw new Error('Не найден экран запуска этого сервиса.');
+console.log(adb(['shell', 'am', 'start', '-W', '-n', component], endpoint));

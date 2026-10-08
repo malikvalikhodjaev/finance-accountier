@@ -156,7 +156,7 @@ test('PDF через Поделиться: подключённый телефо
     assert.equal((await fetch(base + '/api/imports/' + preview.id + '/commit', { method: 'POST', headers, body: '{}' })).status, 403);
     const ticket = await (await fetch(base + '/api/mobile/browser-session', { method: 'POST', headers, body: '{}' })).json();
     const opened = await fetch(base + ticket.path + '&import=' + preview.id, { redirect: 'manual' });
-    assert.equal(opened.headers.get('location'), '/?import=' + preview.id);
+    assert.equal(opened.headers.get('location'), '/?tab=table&import=' + preview.id);
     const browser = { 'Content-Type': 'application/json', Cookie: opened.headers.get('set-cookie').split(';')[0] };
     const shown = await (await fetch(base + '/api/imports/' + preview.id, { headers: browser })).json();
     assert.equal(shown.summary.total, 1);
@@ -167,7 +167,7 @@ test('PDF через Поделиться: подключённый телефо
     assert.equal(repeated.summary.existing, 1); assert.equal(app.store.all().length, 1);
     const nextTicket = await (await fetch(base + '/api/mobile/browser-session', { method: 'POST', headers, body: '{}' })).json();
     const invalid = await fetch(base + nextTicket.path + '&import=https://other.example', { redirect: 'manual' });
-    assert.equal(invalid.headers.get('location'), '/');
+    assert.equal(invalid.headers.get('location'), '/?tab=table');
     await fetch(base + '/api/device/revoke', { method: 'POST', headers: ownerHeaders, body: JSON.stringify({ id: paired.deviceId }) });
     assert.equal((await fetch(route, { method: 'POST', headers, body: JSON.stringify(upload()) })).status, 401);
     assert.equal((await fetch(base + '/api/mobile/imports/' + preview.id, { headers })).status, 401);

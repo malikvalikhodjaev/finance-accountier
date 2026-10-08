@@ -35,10 +35,13 @@ public final class PurposeRules {
     }
     public static boolean needsAnswer(String state, String kind, String operation, String purpose) {
         if (purpose != null && !purpose.trim().isEmpty()) return false;
-        if (state.equals("duplicate") || state.equals("ignored")) return false;
-        if (state.equals("recorded") && kind.equals("expense")) return true;
-        String op = operation == null ? "" : operation.toLowerCase(Locale.ROOT);
-        return state.equals("review") && kind.equals("unknown") && (op.equals("platezh") || op.startsWith("spisanie "));
+        if ("duplicate".equals(state) || "ignored".equals(state)) return false;
+        if ("recorded".equals(state) && "expense".equals(kind)) return true;
+        String op = operation == null ? "" : operation.trim().toLowerCase(Locale.ROOT).replace('\u2018', '\'').replace('\u2019', '\'');
+        boolean outgoing = op.equals("platezh") || op.equals("platej") || op.startsWith("spisanie ")
+            || op.equals("humo oplata") || op.equals("debit online") || op.equals("kartadan chiqim")
+            || op.equals("online to'lov") || op.equals("to'lov") || op.equals("pokupka") || op.equals("e-com oplata");
+        return "review".equals(state) && "unknown".equals(kind) && outgoing;
     }
     public static String resolvedKind(String currentKind, String answer) {
         String category = category(answer);

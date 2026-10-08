@@ -101,7 +101,7 @@ public final class MainActivity extends Activity {
         boolean ready = smsReady || (access && !CollectorConfig.apps(this).isEmpty());
         boolean asks = CollectorConfig.prefs(this).getBoolean("askPurpose", true);
         boolean promptsAllowed = PaymentPrompts.allowed(this);
-        label(setup, "«На что потратил?»: " + (!asks ? "выключено" : promptsAllowed ? "включено" : "нужно разрешить уведомления"), 13);
+        label(setup, "«На что потратил?»: " + (!asks ? "выключено" : promptsAllowed ? "включено · вопрос приходит уведомлением" : "нужно разрешить уведомления"), 13);
         if (asks && !promptsAllowed) button(setup, "Разрешить вопросы после оплаты", this::allowPromptNotifications);
         boolean expanded = expandSetup == null ? !ready : expandSetup;
         button(setup, expanded ? "Свернуть настройки" : "Настроить сбор", () -> { expandSetup = !expanded; render(); });
@@ -121,15 +121,15 @@ public final class MainActivity extends Activity {
         String error = CollectorConfig.prefs(this).getString("lastError", "");
         if (!error.isEmpty()) label(setup, error, 13);
         String promptError = CollectorConfig.prefs(this).getString("promptError", "");
-        if (!promptError.isEmpty() && !promptsAllowed && asks) label(setup, promptError, 13);
+        if (!promptError.isEmpty() && asks) label(setup, promptError, 13);
         LinearLayout shared = card(page); heading(shared, "Общая база", 20);
         if (SyncConfig.connected(this)) {
             label(shared, "Ожидают отправки: " + store.pendingSync() + " · Конфликтов: " + store.syncConflicts(), 13);
             String lastSync = SyncConfig.prefs(this).getString("lastSync", "");
             if (!lastSync.isEmpty()) label(shared, "Последняя связь: " + java.time.Instant.parse(lastSync).atZone(Formats.ZONE).format(java.time.format.DateTimeFormatter.ofPattern("dd.MM HH:mm")), 13);
             String syncError = SyncConfig.prefs(this).getString("error", ""); if (!syncError.isEmpty()) label(shared, syncError, 13);
-            button(shared, "Общая таблица операций", () -> openWeb("table"));
             button(shared, "Мои дашборды", () -> openWeb("dashboard"));
+            button(shared, "Общая таблица операций", () -> openWeb("table"));
             button(shared, "Синхронизировать сейчас", this::syncNow);
             button(shared, "Настроить связь с компьютером", this::configureSync);
         } else {

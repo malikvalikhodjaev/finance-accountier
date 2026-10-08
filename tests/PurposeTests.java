@@ -33,7 +33,14 @@ public final class PurposeTests {
         check(!PurposeRules.needsAnswer("recorded", "transfer", "Vidacha nalichnykh v bankomate", ""), "Cash withdrawal is not a purchase prompt");
         check(!PurposeRules.needsAnswer("review", "unknown", "Popolnenie scheta", ""), "Funding is not a spending prompt");
         check(PurposeRules.needsAnswer("review", "unknown", "Spisanie c karty", ""), "Ambiguous outgoing payment can get a purpose question");
+        check(!PurposeRules.needsAnswer("review", null, null, null), "Incomplete review record never crashes the unanswered counter");
         long now = Instant.parse("2024-01-22T15:55:00Z").toEpochMilli();
+        for (String operation : new String[]{"HUMO oplata", "Debit online", "Platej", "Kartadan chiqim", "Online to'lov", "To’lov", "Pokupka", "E-Com oplata"}) {
+            check(PurposeRules.notifyNow("sms", "review", "unknown", operation, "", "2024-01-22", now, now), "New debit format gets a purpose question: " + operation);
+            check(!PurposeRules.notifyNow("sms", "review", "unknown", operation, "", "2023-01-22", now, now), "Historical debit format never causes a prompt storm: " + operation);
+        }
+        for (String operation : new String[]{"Kirim", "Kartaga o'tkazma", "Vozvrat", "OTMENA debit online", "Vidacha nalichnykh v bankomate", "Cancelled HUMO oplata", "Перевод"})
+            check(!PurposeRules.needsAnswer("review", "unknown", operation, ""), "Non-purchase or cancellation cannot ask about spending: " + operation);
         check(PurposeRules.notifyNow("sms", "recorded", "expense", "Pokupka", "", "2024-01-22", now, now), "Fresh SMS is prompted");
         check(PurposeRules.notifyNow("push", "recorded", "expense", "Pokupka", "", "2024-01-22", now, now), "Fresh push is prompted");
         check(!PurposeRules.notifyNow("shared", "recorded", "expense", "Pokupka", "", "2024-01-22", now, now), "Historical text import never posts questions");

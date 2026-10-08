@@ -6,6 +6,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createStore, hash, fail, selectRows, aggregate, editableKeys, normaliseEvent } from './store.mjs';
 import { createImporter } from './imports.mjs';
+import { cashflow } from './cashflow.mjs';
+import { createOrders, services } from './orders.mjs';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const assets = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'], '/icon.svg': ['icon.svg', 'image/svg+xml'] };
@@ -15,6 +17,7 @@ export function createFinanceServer({ directory = path.join(root, '.web'), allow
   mkdirSync(directory, { recursive: true });
   const store = createStore(path.join(directory, 'money.sqlite'));
   const importer = createImporter(store, directory, { parser: importParser });
+  const orders = createOrders(store);
   const credentialsPath = path.join(directory, 'auth.json');
   if (!existsSync(credentialsPath)) {
     const password = token(), salt = randomBytes(16).toString('hex');
@@ -93,7 +96,7 @@ export function createFinanceServer({ directory = path.join(root, '.web'), allow
         const row = store.db.prepare('SELECT * FROM tickets WHERE hash=? AND expires>?').get(hash(ticket), Date.now());
         if (!row || !store.db.prepare('SELECT 1 FROM devices WHERE id=? AND revoked=0').get(row.device_id)) fail('Ссылка подключения истекла.', 401);
         const params = new URLSearchParams();
-        if (url.searchParams.get('tab') === 'dashboard') params.set('tab', 'dashboard');
+        params.set('tab', ['table', 'dashboard', 'orders'].includes(url.searchParams.get('tab')) ? url.searchParams.get('tab') : 'table');
         const importId = url.searchParams.get('import');
         if (/^[a-f0-9-]{36}$/.test(importId || '')) params.set('import', importId);
         store.db.prepare('DELETE FROM tickets WHERE hash=?').run(row.hash); session(res, row.device_id); res.writeHead(303, { Location: '/' + (params.size ? '?' + params : '') }); return res.end();
@@ -121,6 +124,23 @@ export function createFinanceServer({ directory = path.join(root, '.web'), allow
         return json(res, 200, importer.preview(url.pathname.split('/').at(-1)));
       }
       if (identity.mobile) fail('Открой таблицы внутри приложения.', 403);
+      if (req.method === 'GET' && url.pathname === '/api/cashflow') return json(res, 200, cashflow(store.all(false), Object.fromEntries(url.searchParams), url.searchParams.get('group') || 'month'));
+      if (req.method === 'GET' && url.pathname === '/api/orders') return json(res, 200, { services, rows: orders.all(Object.fromEntries(url.searchParams)), sources: orders.batches() });
+      if (/^\/api\/orders\/[a-f0-9-]{36}(?:\/link)?$/.test(url.pathname)) {
+        const id = url.pathname.split('/')[3];
+        if (req.method === 'GET' && !url.pathname.endsWith('/link')) return json(res, 200, orders.detail(id));
+        if (req.method === 'POST' && url.pathname.endsWith('/link')) return json(res, 200, orders.link(id, await body(req), identity.deviceId || 'web'));
+      }
+      if (req.method === 'GET' && /^\/api\/order-files\/[a-f0-9-]{36}\/\d+$/.test(url.pathname)) {
+        const [, , , id, index] = url.pathname.split('/'), batch = orders.batches().find(item => item.id === id), artifact = batch?.artifacts[Number(index)];
+        if (!artifact || !/^[a-f0-9]{64}\.(?:png|pdf|xml|html|json|txt)$/.test(artifact.file)) fail('Исходный файл не найден.', 404);
+        const file = path.join(directory, 'order-files', id, artifact.file);
+        if (!existsSync(file)) fail('Исходный файл не найден.', 404);
+        const data = readFileSync(file); if (hash(data) !== artifact.sha256) fail('Целостность исходного файла нарушена.', 409);
+        const extension = path.extname(artifact.file).slice(1), inline = ['pdf', 'png'].includes(extension);
+        res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'");
+        res.writeHead(200, { 'Content-Type': extension === 'pdf' ? 'application/pdf' : extension === 'png' ? 'image/png' : 'application/octet-stream', 'Content-Disposition': (inline ? 'inline' : 'attachment') + '; filename="source.' + extension + '"' }); return res.end(data);
+      }
       if (req.method === 'POST' && url.pathname === '/api/imports/preview') return json(res, 201, await importer.upload(await body(req)));
       if (/^\/api\/imports\/[a-f0-9-]{36}(?:\/commit)?$/.test(url.pathname)) {
         const id = url.pathname.split('/')[3];
@@ -143,7 +163,7 @@ export function createFinanceServer({ directory = path.join(root, '.web'), allow
       if (req.method === 'POST' && url.pathname === '/api/events') return json(res, 201, store.manual(await body(req)));
       if (/^\/api\/events\/[a-f0-9-]{36}$/.test(url.pathname)) {
         const id = url.pathname.split('/').at(-1);
-        if (req.method === 'GET') return json(res, 200, { row: store.get(id), history: store.db.prepare('SELECT version,actor,at,data FROM history WHERE event_id=? ORDER BY version DESC').all(id), sourceHistory: store.db.prepare('SELECT changed_at,previous_json FROM source_revisions WHERE event_id=? ORDER BY changed_at DESC').all(id) });
+        if (req.method === 'GET') return json(res, 200, { row: store.get(id), orders: orders.forEvent(id), history: store.db.prepare('SELECT version,actor,at,data FROM history WHERE event_id=? ORDER BY version DESC').all(id), sourceHistory: store.db.prepare('SELECT changed_at,previous_json FROM source_revisions WHERE event_id=? ORDER BY changed_at DESC').all(id) });
         if (req.method === 'PATCH') return json(res, 200, store.edit(id, await body(req), identity.deviceId || 'web'));
       }
       if (req.method === 'POST' && /^\/api\/(fields|views|dashboards)$/.test(url.pathname)) return json(res, 200, store.setting({ fields: 'field', views: 'view', dashboards: 'dashboard' }[url.pathname.split('/').at(-1)], await body(req)));
@@ -164,7 +184,7 @@ export function createFinanceServer({ directory = path.join(root, '.web'), allow
         const csv = [columns.map(key => cell(fields.find(field => field.id === key)?.name || key)).join(','), ...rows.map(row => columns.map(key => cell(key === 'amount' ? row.amount_minor === null ? '' : (BigInt(row.amount_minor) / 100n) + '.' + String(BigInt(row.amount_minor) % 100n).padStart(2, '0') : key.startsWith('f_') ? row.custom[key] ?? '' : row[key] ?? '')).join(','))].join('\r\n');
         res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="rhythm-money.csv"' }); return res.end('\uFEFF' + csv);
       }
-      if (req.method === 'GET' && url.pathname === '/api/backup') { res.setHeader('Content-Disposition', 'attachment; filename="rhythm-money-backup.json"'); return json(res, 200, { schema: 'rhythm-money-web-v1', exportedAt: new Date().toISOString(), events: store.all(), history: store.db.prepare('SELECT * FROM history').all(), sourceRevisions: store.db.prepare('SELECT * FROM source_revisions').all(), fields: store.settings('field'), views: store.settings('view'), dashboards: store.settings('dashboard') }); }
+      if (req.method === 'GET' && url.pathname === '/api/backup') { res.setHeader('Content-Disposition', 'attachment; filename="rhythm-money-backup.json"'); return json(res, 200, { schema: 'rhythm-money-web-v1', exportedAt: new Date().toISOString(), events: store.all(), history: store.db.prepare('SELECT * FROM history').all(), sourceRevisions: store.db.prepare('SELECT * FROM source_revisions').all(), fields: store.settings('field'), views: store.settings('view'), dashboards: store.settings('dashboard'), serviceOrders: orders.backup() }); }
       fail('Страница не найдена.', 404);
     } catch (error) {
       if (!error.status && !(error instanceof SyntaxError)) console.error(error);
@@ -172,7 +192,7 @@ export function createFinanceServer({ directory = path.join(root, '.web'), allow
     }
   }
   const server = http.createServer(handler); server.requestTimeout = 120000; server.headersTimeout = 10000;
-  return { server, store, host, close: () => new Promise(resolve => server.close(() => { store.close(); resolve(); })) };
+  return { server, store, orders, host, close: () => new Promise(resolve => server.close(() => { store.close(); resolve(); })) };
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const port = Number(process.env.FINANCE_PORT || 8788);
