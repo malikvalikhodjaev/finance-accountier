@@ -143,13 +143,14 @@ export function createStore(filename) {
     }
     return result;
   }
-  function edit(id, input, actor = 'web') { return transaction(() => {
+  function edit(id, input, actor = 'web', audit = null) { return transaction(() => {
     const current = get(id); if (input.expectedVersion !== current.version) fail('Эта операция уже изменилась. Твой черновик сохранён в форме; перечитай текущую запись.', 409, current);
     for (const key of Object.keys(input.event || {})) if (!editableKeys.includes(key)) fail('Поле нельзя менять: ' + key);
     const event = normaliseEvent({ ...current, ...input.event });
     const custom = input.custom === undefined ? current.custom : validateExtras(input.custom, current.custom);
     const result = save(event, actor, JSON.stringify(custom) !== JSON.stringify(current.custom));
     db.prepare('INSERT INTO extras VALUES(?,?) ON CONFLICT(event_id) DO UPDATE SET data=excluded.data').run(id, JSON.stringify(custom));
+    if (audit && JSON.stringify(custom) !== JSON.stringify(current.custom)) audit(current, { ...result, custom });
     return { ...result, custom };
   }); }
   function manual(input) { return transaction(() => {

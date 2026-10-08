@@ -47,6 +47,14 @@ test('Повторный запуск не создаёт колонки зан�
     assert.equal(economy.classify({ role: 'living', rows: [{ id: a.id, expectedVersion: 1 }, { id: b.id, expectedVersion: 1 }] }).changed, 2);
     assert.equal(store.get(a.id).raw_text, 'Original raw source'); assert.equal(store.get(a.id).custom[economy.fields.role], economyRoles.living); assert.equal(economy.backup().classifications.length, 2);
     assert.equal(economy.report({ period: 'all' }).totals[0].living, '20000');
+    store.edit(a.id, { expectedVersion: 2, custom: { [economy.fields.role]: economyRoles.work } }, 'web', economy.audit);
+    const audit = economy.backup().classifications.at(-1);
+    assert.equal(JSON.parse(audit.previous_json)[economy.fields.role], economyRoles.living);
+    assert.equal(JSON.parse(audit.next_json)[economy.fields.role], economyRoles.work);
+    assert.throws(() => store.edit(a.id, { expectedVersion: 2, custom: {} }, 'web', economy.audit), /изменилась/);
+    assert.equal(economy.backup().classifications.length, 3);
+    assert.throws(() => store.edit(a.id, { expectedVersion: 3, custom: { [economy.fields.role]: economyRoles.living } }, 'web', () => { throw new Error('Audit write failed'); }), /Audit write failed/);
+    assert.equal(store.get(a.id).version, 3); assert.equal(store.get(a.id).custom[economy.fields.role], economyRoles.work);
   } finally { store.close(); }
 });
 

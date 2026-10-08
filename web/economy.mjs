@@ -84,5 +84,6 @@ export function createEconomy(store) {
     }
     return { changed: rows.length };
   });
-  return { fields, readPlan, savePlan, classify, report: filters => economyReport(store.all(false), fields, filters), backup: () => ({ plans: store.db.prepare('SELECT * FROM economy_plans').all(), history: store.db.prepare('SELECT * FROM economy_plan_history').all(), classifications: store.db.prepare('SELECT * FROM economy_classification_history').all() }) };
+  const audit = (before, after) => store.db.prepare('INSERT INTO economy_classification_history VALUES(?,?,?,?,?)').run(after.id, after.version, JSON.stringify(before.custom), JSON.stringify(after.custom), new Date().toISOString());
+  return { fields, readPlan, savePlan, classify, audit, report: filters => economyReport(store.all(false), fields, filters), backup: () => ({ plans: store.db.prepare('SELECT * FROM economy_plans').all(), history: store.db.prepare('SELECT * FROM economy_plan_history').all(), classifications: store.db.prepare('SELECT * FROM economy_classification_history').all() }) };
 }

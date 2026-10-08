@@ -177,7 +177,7 @@ export function createFinanceServer({ directory = path.join(root, '.web'), allow
       if (/^\/api\/events\/[a-f0-9-]{36}$/.test(url.pathname)) {
         const id = url.pathname.split('/').at(-1);
         if (req.method === 'GET') return json(res, 200, { row: store.get(id), orders: orders.forEvent(id), history: store.db.prepare('SELECT version,actor,at,data FROM history WHERE event_id=? ORDER BY version DESC').all(id), sourceHistory: store.db.prepare('SELECT changed_at,previous_json FROM source_revisions WHERE event_id=? ORDER BY changed_at DESC').all(id) });
-        if (req.method === 'PATCH') return json(res, 200, store.edit(id, await body(req), identity.deviceId || 'web'));
+        if (req.method === 'PATCH') return json(res, 200, store.edit(id, await body(req), identity.deviceId || 'web', economy.audit));
       }
       if (req.method === 'POST' && /^\/api\/(fields|views|dashboards)$/.test(url.pathname)) return json(res, 200, store.setting({ fields: 'field', views: 'view', dashboards: 'dashboard' }[url.pathname.split('/').at(-1)], await body(req)));
       if (req.method === 'GET' && url.pathname === '/api/dashboard') {

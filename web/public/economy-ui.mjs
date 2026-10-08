@@ -27,7 +27,7 @@ export async function renderEconomy(panel, context) {
   }
   function bulk(kind) {
     const rows = report.unassigned.filter(row => row.kind === kind && row.currency === currency.value);
-    if (!rows.length) return;
+    if (!rows.length) { message(kind === 'income' ? 'Подтверждённых доходов без роли за этот период нет. Сначала уточни поступления в таблице.' : 'Подтверждённых расходов без роли за этот период нет.'); return; }
     const total = rows.reduce((sum, row) => sum + BigInt(row.amountMinor), 0n);
     const options = kind === 'expense' ? ['living', 'work', 'variable', 'investment', 'exclude'] : ['earned', 'other', 'financing', 'exclude'];
     const role = select(options.map(key => [key, report.roles[key]]), kind === 'expense' ? 'living' : 'earned'); role.setAttribute('aria-label', 'Роль выбранных операций');
