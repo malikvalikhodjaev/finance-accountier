@@ -48,8 +48,8 @@ function modal(title, body, callback, saveLabel = 'Сохранить') {
 document.querySelector('#dialog-cancel').onclick = () => dialog.close();
 dialogForm.onsubmit = async event => {
   event.preventDefault(); if (!saveDialog) return;
-  const save = document.querySelector('#dialog-save'); save.disabled = true; dialogError.textContent = '';
-  try { await saveDialog(); dialog.close(); } catch (error) { dialogError.textContent = error.message; }
+  const save = document.querySelector('#dialog-save'); if (save.disabled) return; save.disabled = true; dialogError.textContent = '';
+  try { await saveDialog(); dialog.close(); } catch (error) { dialogError.textContent = error.message; dialogError.scrollIntoView({ block: 'nearest' }); }
   finally { save.disabled = false; }
 };
 async function loadMeta() { state.meta = await api('/api/meta'); }
@@ -86,7 +86,7 @@ function query(filters = state.filters) { return new URLSearchParams(Object.entr
 function importStatement() {
   const file = el('input', { type: 'file', accept: 'application/pdf,.pdf', 'aria-label': 'PDF выписки Uzum Bank' });
   const status = el('p', { class: 'subtle' });
-  modal('Импорт выписки', el('div', {}, el('p', { text: 'Uzum Bank: карта Uzum → Справки и выписки → Выписка по счёту → период → Английский. Сохрани PDF на телефон или компьютер и выбери его здесь.' }), file, status), null);
+  modal('Импорт выписки', el('div', {}, el('p', { text: 'Uzum Bank: карта Uzum → Справки и выписки → Выписка по счёту → период → Английский. На телефоне можно сразу выбрать «Поделиться → Ритм · деньги». Или сохрани PDF и выбери его здесь.' }), file, status), null);
   const generation = dialogGeneration;
   file.onchange = async () => {
     const source = file.files[0]; if (!source) return;
@@ -96,20 +96,31 @@ function importStatement() {
       const data = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(',')[1]); reader.onerror = () => reject(new Error('Не удалось прочитать файл.')); reader.readAsDataURL(source); });
       const preview = await api('/api/imports/preview', { method: 'POST', body: { filename: source.name, data } });
       if (!dialog.open || generation !== dialogGeneration) return;
-      const info = el('div', {}, el('p', { text: preview.filename + ' · ' + preview.pages + ' стр. · ' + preview.period.from + ' — ' + preview.period.to }), el('p', { text: 'Всего: ' + preview.summary.total + '. Новых учтённых: ' + preview.summary.recorded + '. На проверку: ' + preview.summary.review + '. Возможных повторов: ' + preview.summary.duplicates + '. Уже в базе: ' + preview.summary.existing + '.' }), el('p', { class: 'subtle', text: preview.note }));
-      const body = el('tbody'), table = el('div', { class: 'table-wrap' }, el('table', {}, el('thead', {}, el('tr', {}, ...['Дата', 'Магазин / сервис', 'Сумма', 'Учёт'].map(text => el('th', { text })))), body));
-      let offset = 0;
-      const more = button('Показать ещё строки', () => addRows(), true);
-      function addRows() {
-        for (const row of preview.rows.slice(offset, offset + 50)) body.append(el('tr', {}, el('td', { text: row.date }), el('td', { class: 'text-cell', text: row.merchant }), el('td', { class: 'amount', text: money(row.amountMinor) + ' ' + row.currency }), el('td', { class: 'text-cell', text: row.existing ? 'Уже в базе' : (statuses[row.state] || row.state) + (row.reason ? ' · ' + row.reason : '') })));
-        offset += 50; more.hidden = offset >= preview.rows.length;
-      }
-      addRows(); info.append(table, more);
-      content.replaceChildren(el('h2', { text: 'Проверка выписки' }), info);
-      const save = document.querySelector('#dialog-save'); save.hidden = false; save.textContent = 'Добавить в общую базу';
-      saveDialog = async () => { const result = await api('/api/imports/' + preview.id + '/commit', { method: 'POST', body: {} }); await loadMeta(); await render(); message('Добавлено: ' + result.inserted + '. Уже были в базе: ' + result.skipped + '.'); };
+      showStatementPreview(preview);
     } catch (error) { status.textContent = error.message; file.disabled = false; }
   };
+}
+function showStatementPreview(preview) {
+  const info = el('div', {}, el('p', { text: preview.filename + ' · ' + preview.pages + ' стр. · ' + preview.period.from + ' — ' + preview.period.to }), el('p', { text: 'Всего: ' + preview.summary.total + '. Новых учтённых: ' + preview.summary.recorded + '. На проверку: ' + preview.summary.review + '. Возможных повторов: ' + preview.summary.duplicates + '. Уже в базе: ' + preview.summary.existing + '.' }), el('p', { class: 'subtle', text: preview.note }));
+  const body = el('tbody'), table = el('div', { class: 'table-wrap' }, el('table', {}, el('thead', {}, el('tr', {}, ...['Дата', 'Магазин / сервис', 'Сумма', 'Учёт'].map(text => el('th', { text })))), body));
+  let offset = 0;
+  const more = button('Показать ещё строки', () => addRows(), true);
+  function addRows() {
+    for (const row of preview.rows.slice(offset, offset + 50)) body.append(el('tr', {}, el('td', { text: row.date }), el('td', { class: 'text-cell', text: row.merchant }), el('td', { class: 'amount', text: money(row.amountMinor) + ' ' + row.currency }), el('td', { class: 'text-cell', text: row.existing ? 'Уже в базе' : (statuses[row.state] || row.state) + (row.reason ? ' · ' + row.reason : '') })));
+    offset += 50; more.hidden = offset >= preview.rows.length;
+  }
+  addRows(); info.append(table, more);
+  info.insertBefore(el('div', { class: 'row' }, button('Добавить операции', () => dialogForm.requestSubmit()), button('Закрыть проверку', () => dialog.close(), true)), table);
+  modal('Проверка выписки', info, async () => { const result = await api('/api/imports/' + preview.id + '/commit', { method: 'POST', body: {} }); await loadMeta(); await render(); message('Добавлено: ' + result.inserted + '. Уже были в базе: ' + result.skipped + '.'); }, 'Добавить в общую базу');
+}
+async function resumeStatementImport() {
+  const address = new URL(location.href), id = address.searchParams.get('import');
+  if (!/^[a-f0-9-]{36}$/.test(id || '')) return;
+  address.searchParams.delete('import'); history.replaceState(null, '', address.pathname + address.search);
+  const loading = el('p', { text: 'Открываю полученную выписку…' }); modal('Проверка выписки', loading, null);
+  const generation = dialogGeneration;
+  try { const preview = await api('/api/imports/' + id); if (dialog.open && generation === dialogGeneration) showStatementPreview(preview); }
+  catch (error) { if (dialog.open && generation === dialogGeneration) loading.textContent = 'Не удалось открыть выписку: ' + error.message + ' Вернись в «Полученные выписки» и повтори проверку.'; }
 }
 function name(key) { return names[key] || state.meta.fields.find(field => field.id === key)?.name || key; }
 async function render() {
@@ -267,11 +278,11 @@ async function showConflicts() {
 }
 function login() {
   const password = el('input', { type: 'password', autocomplete: 'current-password', required: true, 'aria-label': 'Пароль' }), error = el('p', { role: 'alert' }), form = el('form', {}, field('Пароль', password), el('button', { type: 'submit', text: 'Войти' }), error);
-  form.onsubmit = async event => { event.preventDefault(); try { await api('/api/login', { method: 'POST', body: { password: password.value } }); await loadMeta(); render(); } catch (problem) { error.textContent = problem.message; } };
+  form.onsubmit = async event => { event.preventDefault(); try { await api('/api/login', { method: 'POST', body: { password: password.value } }); await loadMeta(); await render(); await resumeStatementImport(); } catch (problem) { error.textContent = problem.message; } };
   app.replaceChildren(el('section', { class: 'login' }, el('h1', { text: 'Войти в Ритм · деньги' }), el('p', { text: 'На основном компьютере открой 127.0.0.1:8788. Телефон подключается кодом из окна «Подключение».' }), form));
 }
 for (const item of document.querySelectorAll('[data-tab]')) item.onclick = () => { if (!state.meta) return; state.tab = item.dataset.tab; history.replaceState(null, '', state.tab === 'table' ? '/' : '/?tab=dashboard'); render(); };
 document.querySelector('#connect').onclick = () => state.meta ? connection() : login();
-async function start() { try { await loadMeta(); render(); } catch (error) { if (error.status === 401) login(); else app.replaceChildren(el('p', { text: 'Компьютер недоступен: ' + error.message }), button('Повторить', start)); } }
+async function start() { try { await loadMeta(); await render(); await resumeStatementImport(); } catch (error) { if (error.status === 401) login(); else app.replaceChildren(el('p', { text: 'Компьютер недоступен: ' + error.message }), button('Повторить', start)); } }
 start();
 setInterval(async () => { if (!state.meta || dialog.open || document.hidden) return; try { await loadMeta(); if (state.tab === 'table') await loadRows(false); else if (state.refreshBoard) await state.refreshBoard(); } catch (error) { if (error.status === 401) { state.meta = null; login(); } } }, 20000);

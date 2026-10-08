@@ -33,7 +33,10 @@ public final class WebActivity extends Activity {
             try {
                 SyncEngine.sync(this);
                 String target = SyncEngine.browser(this, "dashboard".equals(getIntent().getStringExtra("tab")) ? "dashboard" : "table");
-                runOnUiThread(() -> { page.removeView(loading); createWeb(target); });
+                String importId = getIntent().getStringExtra("importId");
+                if (importId != null && importId.matches("[a-f0-9-]{36}")) target += "&import=" + importId;
+                final String address = target;
+                runOnUiThread(() -> { page.removeView(loading); createWeb(address); });
             } catch (Exception error) { runOnUiThread(() -> loading.setText("Компьютер недоступен. Проверь Wi-Fi и запущен ли сервер на ПК. Операции продолжают сохраняться на телефоне.")); }
         }, "rhythm-web").start();
     }

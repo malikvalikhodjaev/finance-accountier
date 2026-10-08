@@ -13,9 +13,15 @@ public final class SyncTransport {
     public static JSONObject request(Context context, String url, JSONObject body, boolean authenticated) throws Exception {
         return new JSONObject(new String(bytes(context, url, body, authenticated, null), StandardCharsets.UTF_8));
     }
+    public static JSONObject statement(Context context, String path, JSONObject body) throws Exception {
+        return new JSONObject(new String(bytes(context, SyncConfig.url(context) + path, body, true, null, 120000), StandardCharsets.UTF_8));
+    }
     public static byte[] bytes(Context context, String url, JSONObject body, boolean authenticated, String cookie) throws Exception {
+        return bytes(context, url, body, authenticated, cookie, 20000);
+    }
+    private static byte[] bytes(Context context, String url, JSONObject body, boolean authenticated, String cookie, int timeout) throws Exception {
         HttpURLConnection connection = (HttpURLConnection)new URL(url).openConnection();
-        connection.setConnectTimeout(8000); connection.setReadTimeout(20000); connection.setInstanceFollowRedirects(false); connection.setRequestProperty("Accept", "application/json");
+        connection.setConnectTimeout(8000); connection.setReadTimeout(timeout); connection.setInstanceFollowRedirects(false); connection.setRequestProperty("Accept", "application/json");
         if (authenticated) connection.setRequestProperty("Authorization", "Bearer " + SyncConfig.prefs(context).getString("token", ""));
         if (cookie != null) connection.setRequestProperty("Cookie", cookie);
         try {

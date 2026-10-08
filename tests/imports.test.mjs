@@ -82,3 +82,43 @@ test('HTTP: импорт требует входа; PDF проходит пре�
     const invalid = await fetch(base + '/api/imports/preview', { method: 'POST', headers, body: JSON.stringify({ filename: 'file.pdf', data: Buffer.from('not-a-pdf').toString('base64') }) }); assert.equal(invalid.status, 400);
   } finally { await app.close(); }
 });
+
+test('PDF через Поделиться: подключённый телефон готовит выписку, браузер проверяет и сохраняет её', async () => {
+  const dir = directory(), app = createFinanceServer({ directory: dir, importParser: async () => parsed([purchase]) });
+  await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
+  const base = 'http://127.0.0.1:' + app.server.address().port;
+  try {
+    const welcome = await fetch(base + '/');
+    const ownerHeaders = { 'Content-Type': 'application/json', Cookie: welcome.headers.get('set-cookie').split(';')[0] };
+    const code = (await (await fetch(base + '/api/pairing', { method: 'POST', headers: ownerHeaders, body: '{}' })).json()).code;
+    const paired = await (await fetch(base + '/api/pair', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code, label: 'PDF test phone' }) })).json();
+    const headers = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + paired.token };
+    const route = base + '/api/mobile/imports/preview';
+    assert.equal((await fetch(route, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(upload()) })).status, 401);
+    assert.equal((await fetch(route, { method: 'POST', headers: ownerHeaders, body: JSON.stringify(upload()) })).status, 403);
+    const response = await fetch(route, { method: 'POST', headers, body: JSON.stringify(upload()) });
+    assert.equal(response.status, 201); const preview = await response.json();
+    assert.equal(preview.sha256, hash(Buffer.from(upload().data, 'base64')));
+    assert.equal(app.store.all().length, 0);
+    const receipt = await fetch(base + '/api/mobile/imports/' + preview.id, { headers });
+    assert.equal(receipt.status, 200); assert.equal((await receipt.json()).committed, false);
+    assert.equal((await fetch(base + '/api/imports/' + preview.id + '/commit', { method: 'POST', headers, body: '{}' })).status, 403);
+    const ticket = await (await fetch(base + '/api/mobile/browser-session', { method: 'POST', headers, body: '{}' })).json();
+    const opened = await fetch(base + ticket.path + '&import=' + preview.id, { redirect: 'manual' });
+    assert.equal(opened.headers.get('location'), '/?import=' + preview.id);
+    const browser = { 'Content-Type': 'application/json', Cookie: opened.headers.get('set-cookie').split(';')[0] };
+    const shown = await (await fetch(base + '/api/imports/' + preview.id, { headers: browser })).json();
+    assert.equal(shown.summary.total, 1);
+    const committed = await fetch(base + '/api/imports/' + preview.id + '/commit', { method: 'POST', headers: browser, body: '{}' });
+    assert.equal((await committed.json()).inserted, 1);
+    assert.equal((await (await fetch(base + '/api/mobile/imports/' + preview.id, { headers })).json()).committed, true);
+    const repeated = await (await fetch(route, { method: 'POST', headers, body: JSON.stringify(upload()) })).json();
+    assert.equal(repeated.summary.existing, 1); assert.equal(app.store.all().length, 1);
+    const nextTicket = await (await fetch(base + '/api/mobile/browser-session', { method: 'POST', headers, body: '{}' })).json();
+    const invalid = await fetch(base + nextTicket.path + '&import=https://other.example', { redirect: 'manual' });
+    assert.equal(invalid.headers.get('location'), '/');
+    await fetch(base + '/api/device/revoke', { method: 'POST', headers: ownerHeaders, body: JSON.stringify({ id: paired.deviceId }) });
+    assert.equal((await fetch(route, { method: 'POST', headers, body: JSON.stringify(upload()) })).status, 401);
+    assert.equal((await fetch(base + '/api/mobile/imports/' + preview.id, { headers })).status, 401);
+  } finally { await app.close(); }
+});

@@ -92,7 +92,11 @@ export function createFinanceServer({ directory = path.join(root, '.web'), allow
         if (!/^[A-Za-z0-9_-]{43}$/.test(ticket)) fail('Ссылка подключения недействительна.', 401);
         const row = store.db.prepare('SELECT * FROM tickets WHERE hash=? AND expires>?').get(hash(ticket), Date.now());
         if (!row || !store.db.prepare('SELECT 1 FROM devices WHERE id=? AND revoked=0').get(row.device_id)) fail('Ссылка подключения истекла.', 401);
-        store.db.prepare('DELETE FROM tickets WHERE hash=?').run(row.hash); session(res, row.device_id); res.writeHead(303, { Location: url.searchParams.get('tab') === 'dashboard' ? '/?tab=dashboard' : '/' }); return res.end();
+        const params = new URLSearchParams();
+        if (url.searchParams.get('tab') === 'dashboard') params.set('tab', 'dashboard');
+        const importId = url.searchParams.get('import');
+        if (/^[a-f0-9-]{36}$/.test(importId || '')) params.set('import', importId);
+        store.db.prepare('DELETE FROM tickets WHERE hash=?').run(row.hash); session(res, row.device_id); res.writeHead(303, { Location: '/' + (params.size ? '?' + params : '') }); return res.end();
       }
       if ((req.method === 'GET' || req.method === 'HEAD') && assets[url.pathname]) {
         const loopback = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
@@ -107,6 +111,14 @@ export function createFinanceServer({ directory = path.join(root, '.web'), allow
       if (req.method === 'POST' && url.pathname === '/api/sync') {
         if (!identity.mobile) fail('Нужен подключённый телефон.', 403);
         return json(res, 200, store.sync(await body(req), identity.deviceId));
+      }
+      if (req.method === 'POST' && url.pathname === '/api/mobile/imports/preview') {
+        if (!identity.mobile) fail('Нужен подключённый телефон.', 403);
+        return json(res, 201, await importer.upload(await body(req)));
+      }
+      if (req.method === 'GET' && /^\/api\/mobile\/imports\/[a-f0-9-]{36}$/.test(url.pathname)) {
+        if (!identity.mobile) fail('Нужен подключённый телефон.', 403);
+        return json(res, 200, importer.preview(url.pathname.split('/').at(-1)));
       }
       if (identity.mobile) fail('Открой таблицы внутри приложения.', 403);
       if (req.method === 'POST' && url.pathname === '/api/imports/preview') return json(res, 201, await importer.upload(await body(req)));

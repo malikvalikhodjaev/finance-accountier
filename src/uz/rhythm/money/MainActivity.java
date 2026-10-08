@@ -136,6 +136,8 @@ public final class MainActivity extends Activity {
             label(shared, "Таблицы и дашборды на компьютере и в приложении. Операции отправятся после подключения к твоему серверу.", 14);
             button(shared, "Подключить общую таблицу", this::configureSync);
         }
+        int statements = StatementInbox.list(this).size();
+        button(shared, statements > 0 ? "Полученные выписки: " + statements : "Выписки через «Поделиться»", () -> startActivity(new Intent(this, ImportActivity.class)));
         LinearLayout history = card(page); heading(history, "История банковских SMS", 20);
         label(history, "Забрать старые операции с телефона. Переводы и неясные поступления проверяются отдельно от расходов.", 14);
         JSONObject imported = store.historyState();
