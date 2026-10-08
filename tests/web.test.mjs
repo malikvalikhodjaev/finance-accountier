@@ -55,6 +55,17 @@ test('HTTP: данные закрыты, код одноразовый, токе
     const paired = await fetch(url + '/api/pair', pairRequest); assert.equal(paired.status, 201); const device = await paired.json(); assert.ok(device.serverId);
     assert.equal((await fetch(url + '/api/pair', pairRequest)).status, 401);
     const row = sample(); const synced = await fetch(url + '/api/sync', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + device.token }, body: JSON.stringify({ cursor: 0, changes: [{ event: row, clientRevision: 1, baseVersion: 0 }] }) }); assert.equal(synced.status, 200);
+    const mobileHeaders = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + device.token };
+    const ticket = await (await fetch(url + '/api/mobile/browser-session', { method: 'POST', headers: mobileHeaders, body: '{}' })).json();
+    const mobileLogin = await fetch(url + ticket.path, { redirect: 'manual' }); assert.equal(mobileLogin.status, 303);
+    const browserCookie = mobileLogin.headers.get('set-cookie').split(';')[0]; assert.equal((await fetch(url + '/api/events', { headers: { Cookie: browserCookie } })).status, 200);
+    assert.equal((await fetch(url + ticket.path, { redirect: 'manual' })).status, 401);
+    await fetch(url + '/api/events/' + row.id, { method: 'PATCH', headers, body: JSON.stringify({ expectedVersion: 1, event: { purpose: 'дом' } }) });
+    const conflicted = await (await fetch(url + '/api/sync', { method: 'POST', headers: mobileHeaders, body: JSON.stringify({ cursor: 0, changes: [{ event: { ...row, purpose: 'кофе' }, clientRevision: 2, baseVersion: 1 }] }) })).json(); assert.equal(conflicted.conflicts.length, 1);
+    const conflict = (await (await fetch(url + '/api/conflicts', { headers })).json()).conflicts[0];
+    const resolution = await fetch(url + '/api/conflicts/resolve', { method: 'POST', headers, body: JSON.stringify({ id: conflict.id, choice: 'server', expectedVersion: conflict.current.version }) }); assert.equal(resolution.status, 200);
+    const resolved = await (await fetch(url + '/api/sync', { method: 'POST', headers: mobileHeaders, body: JSON.stringify({ cursor: 0, changes: [] }) })).json(); assert.equal(resolved.resolutions[0].event.purpose, 'дом');
+    const confirmed = await (await fetch(url + '/api/sync', { method: 'POST', headers: mobileHeaders, body: JSON.stringify({ cursor: 0, changes: [], resolvedIds: [conflict.id] }) })).json(); assert.equal(confirmed.resolutions.length, 0);
     assert.equal((await (await fetch(url + '/api/events', { headers })).json()).total, 1);
     assert.equal((await fetch(url + '/api/events', { headers: { Authorization: 'Bearer ' + device.token } })).status, 403);
     assert.equal((await fetch(url + '/api/device/revoke', { method: 'POST', headers, body: JSON.stringify({ id: device.deviceId }) })).status, 200);

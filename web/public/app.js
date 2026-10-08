@@ -64,7 +64,21 @@ function filterForm(onChange) {
   const controls = { period, currency, kind, state: status, from, to, category };
   for (const [key, control] of Object.entries(controls)) control.onchange = () => { state.filters[key] = control.value; if (key === 'period') { state.filters.from = ''; state.filters.to = ''; from.value = ''; to.value = ''; } state.viewId = ''; onChange(); };
   let debounce; search.oninput = () => { state.filters.search = search.value; state.viewId = ''; clearTimeout(debounce); debounce = setTimeout(onChange, 250); };
-  for (const [label, control] of [['Период', period], ['Поиск', search], ['Валюта', currency], ['Тип', kind], ['Учёт', status], ['С даты', from], ['По дату', to], ['Категория', category]]) { const item = el('label', { class: control === search ? 'search' : '' }, label, control); form.append(item); }
+  const extra = el('div', { class: 'filters-extra' }), disclosure = el('details', { class: 'extra-filters' }, el('summary', { text: 'Дополнительные фильтры' }), extra); disclosure.open = window.innerWidth > 700;
+  for (const [label, control] of [['Период', period], ['Поиск', search], ['Валюта', currency], ['Тип', kind], ['Учёт', status], ['С даты', from], ['По дату', to], ['Категория', category]]) { const item = el('label', { class: control === search ? 'search' : '' }, label, control); (control === period || control === search ? form : extra).append(item); }
+  if (state.meta.fields.some(field => field.active)) {
+    const custom = select([['', 'Без фильтра'], ...state.meta.fields.filter(field => field.active).map(field => [field.id, field.name])], state.filters.customField || ''), valueBox = el('label', {}, 'Значение колонки');
+    const valueControl = () => {
+      const selected = state.meta.fields.find(field => field.id === custom.value), value = state.filters.customValue ?? '';
+      const control = selected?.type === 'select' ? select([['', 'Не указано'], ...selected.options.map(item => [item, item])], value) : selected?.type === 'checkbox' ? select([['', 'Не указано'], ['true', 'Да'], ['false', 'Нет']], value) : el('input', { value, type: selected?.type === 'date' ? 'date' : selected?.type === 'number' ? 'number' : 'text', step: selected?.type === 'number' ? 'any' : null });
+      control.disabled = !selected;
+      let debounce; control.oninput = () => { state.filters.customValue = selected?.type === 'number' && control.value !== '' ? String(Number(control.value)) : control.value; state.viewId = ''; clearTimeout(debounce); debounce = setTimeout(onChange, 250); };
+      valueBox.replaceChildren('Значение колонки', control);
+    };
+    custom.onchange = () => { state.filters.customField = custom.value; state.filters.customValue = ''; state.viewId = ''; valueControl(); onChange(); }; valueControl();
+    extra.append(el('label', {}, 'Своя колонка', custom), valueBox);
+  }
+  form.append(disclosure);
   return form;
 }
 function query(filters = state.filters) { return new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== '' && value != null)); }
@@ -78,6 +92,7 @@ function renderTable() {
   const view = select([['', 'Текущее представление'], ...state.meta.views.map(item => [item.id, item.name])], state.viewId);
   view.onchange = () => { const item = state.meta.views.find(v => v.id === view.value); if (!item) return; state.viewId = item.id; state.filters = { ...item.filters }; state.columns = [...item.columns]; render(); };
   const actions = el('div', { class: 'actions' }, button('Добавить операцию', () => editRow(null)), button('Своя колонка', addField, true), button('Колонки', chooseColumns, true), button('Сохранить вид', saveView, true), button('CSV', () => location.href = '/api/export?' + query(), true));
+  const tools = button('Настроить таблицу', () => { const open = actions.classList.toggle('expanded'); tools.setAttribute('aria-expanded', String(open)); }, true); tools.classList.add('mobile-tools'); tools.setAttribute('aria-expanded', 'false'); actions.append(tools);
   app.append(el('div', { class: 'toolbar' }, el('div', { class: 'row' }, el('h1', { text: 'Операции' }), view), actions));
   if (state.meta.conflicts) app.append(button('Разобрать конфликты: ' + state.meta.conflicts, showConflicts, true));
   app.append(filterForm(() => loadRows(false))); tablePanel = el('section', { 'aria-label': 'Таблица операций' }); app.append(tablePanel); loadRows(false).catch(error => { tablePanel.replaceChildren(el('p', { text: error.message })); });
