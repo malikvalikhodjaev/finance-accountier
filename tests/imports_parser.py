@@ -31,3 +31,60 @@ for invalid in [
     except ValueError:
         pass
 print('PDF parser: continuation, exact cents, raw preservation and invalid inputs checked.')
+
+from parse_ipak import extract as extract_ipak
+ipak_cells = ['2026-01-02', 'Перевод', 'TEST\nPERSON', '3 USD']
+ipak = [{'page': 1, 'text': 'История\n2026-01-01 - 2026-01-31\n2026-01-02 Перевод TEST 3 USD\n2026-01-02 Перевод TEST 3 USD', 'tables': [[ipak_cells, ipak_cells[:]]]}]
+history = extract_ipak(ipak)
+assert len(history['rows']) == 2
+assert [r['documentNumber'] for r in history['rows']] == ['1', '2']
+assert all(r['amountMinor'] == 300 and r['postingTime'] is None for r in history['rows'])
+assert history['rows'][0]['fragments'][0]['cells'] == ipak_cells
+for value, expected in [('730 437.50 UZS', 73043750), ('139.80 USD', 13980), ('11 000 RUB', 1100000), ('0 UZS', 0)]:
+    cells = [*ipak_cells[:3], value]
+    one = [{'page': 1, 'text': 'История\n2026-01-01 - 2026-01-31\n2026-01-02 Перевод TEST ' + value, 'tables': [[cells]]}]
+    assert extract_ipak(one)['rows'][0]['amountMinor'] == expected
+for invalid in [
+    [{**ipak[0], 'tables': [[ipak_cells]]}],  # Never silently drop the second row.
+    [{**ipak[0], 'text': 'Other statement'}],
+    [{**ipak[0], 'tables': [[['2026-02-02', *ipak_cells[1:]], ipak_cells]]}],
+    [{**ipak[0], 'tables': [[[*ipak_cells[:3], '3.001 USD'], ipak_cells]]}],
+    [{**ipak[0], 'tables': [[['2026-01-02', 'Покупка', *ipak_cells[2:]], ipak_cells]]}],
+]:
+    try:
+        extract_ipak(invalid)
+        raise AssertionError('Unsupported history accepted')
+    except ValueError:
+        pass
+print('Ipak history: separate identical rows, three currencies, zero, missing direction and complete page coverage checked.')
+
+from parse_payme import extract as extract_payme, HEADERS
+cheque = ['02-01-2026', '12:34:56', 'Списание', 'TEST SHOP', 'TEST COMPANY', 66473.16,
+          'продукты', '', '', '123456******1234', 'TEST CARD', '', 'Payme', 'Оплачен', 'TEST POINT', 'TEST TERMINAL']
+cancelled = ['', '', *cheque[2:13], 'Отменен', *cheque[14:]]
+data = [HEADERS, cheque, cheque[:], cancelled]
+payment = extract_payme(data, {2: '66473.16', 3: '66473.16', 4: '66473.16'}, '20260101_20261231.xlsx')
+assert len(payment['rows']) == 3
+assert [r['occurrence'] for r in payment['rows']] == [1, 2, 1]
+assert payment['rows'][0]['amountMinor'] == 6647316
+assert payment['rows'][0]['cardSuffix'] == '1234'
+assert payment['rows'][2]['postingDate'] is None and not payment['rows'][2]['paid']
+assert payment['rows'][0]['fragments'][0]['cells'] == cheque
+assert payment['rows'][0]['fragments'][0]['row'] == 2
+assert payment['period'] == {'from': '2026-01-01', 'to': '2026-12-31'}
+assert payment['coverage'] == {'from': '2026-01-02', 'to': '2026-01-02'}
+for invalid_rows, invalid_numeric, name in [
+    ([HEADERS, ['', *cheque[1:]]], {2: '1'}, 'file.xlsx'),
+    ([HEADERS, cheque], {2: '0.001'}, 'file.xlsx'),
+    ([HEADERS, cheque], {2: 'NaN'}, 'file.xlsx'),
+    ([HEADERS, cheque], {}, 'file.xlsx'),
+    ([HEADERS, ['=NOW()', *cheque[1:]]], {2: '1'}, 'file.xlsx'),
+    ([HEADERS[:-1], cheque], {2: '1'}, 'file.xlsx'),
+    ([HEADERS, cheque], {2: '1'}, '20250101_20251231.xlsx'),
+]:
+    try:
+        extract_payme(invalid_rows, invalid_numeric, name)
+        raise AssertionError('Unsupported Payme input accepted')
+    except ValueError:
+        pass
+print('Payme: exact XML cents, cancelled rows without dates, separate identical rows, coverage and invalid inputs checked.')

@@ -84,24 +84,27 @@ function filterForm(onChange) {
 }
 function query(filters = state.filters) { return new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== '' && value != null)); }
 function importStatement() {
-  const file = el('input', { type: 'file', accept: 'application/pdf,.pdf', 'aria-label': 'PDF выписки Uzum Bank' });
+  const file = el('input', { type: 'file', accept: 'application/pdf,.pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.xlsx', 'aria-label': 'Файл банковской выписки' });
+  const bank = select([['uzum', 'Uzum Bank · выписка на английском'], ['ipak', 'Ipak Yuli · PDF истории'], ['payme', 'Payme · Excel']]);
+  const card = el('input', { maxlength: '120', 'aria-label': 'Последние четыре цифры своих карт', placeholder: 'Например: 2670, 6351' });
   const status = el('p', { class: 'subtle' });
-  modal('Импорт выписки', el('div', {}, el('p', { text: 'Uzum Bank: карта Uzum → Справки и выписки → Выписка по счёту → период → Английский. На телефоне можно сразу выбрать «Поделиться → Ритм · деньги». Или сохрани PDF и выбери его здесь.' }), file, status), null);
+  modal('Импорт выписки', el('div', {}, el('p', { text: 'Выбери исходный PDF банка или Excel Payme. Для Payme укажи свои карты через запятую: покупки по остальным картам останутся на проверке. Для Ipak можно указать одну карту, если история относится к ней.' }), field('Источник файла', bank), field('Свои карты: последние четыре цифры', card), file, status), null);
   const generation = dialogGeneration;
   file.onchange = async () => {
     const source = file.files[0]; if (!source) return;
-    if (source.size > 5 * 1024 * 1024) { status.textContent = 'Выбери PDF до 5 МБ или выгрузи меньший период.'; return; }
+    if (source.size > 5 * 1024 * 1024) { status.textContent = 'Выбери PDF или XLSX до 5 МБ или выгрузи меньший период.'; return; }
     file.disabled = true; status.textContent = 'Разбираю таблицу. Исходный файл сохраняется без изменений…';
     try {
       const data = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(',')[1]); reader.onerror = () => reject(new Error('Не удалось прочитать файл.')); reader.readAsDataURL(source); });
-      const preview = await api('/api/imports/preview', { method: 'POST', body: { filename: source.name, data } });
+      const cards = card.value.trim() ? card.value.split(',').map(value => value.trim()) : [];
+      const preview = await api('/api/imports/preview', { method: 'POST', body: { filename: source.name, data, bank: bank.value, cardSuffix: bank.value === 'ipak' ? card.value.trim() : '', ownCards: bank.value === 'payme' ? cards : [] } });
       if (!dialog.open || generation !== dialogGeneration) return;
       showStatementPreview(preview);
     } catch (error) { status.textContent = error.message; file.disabled = false; }
   };
 }
 function showStatementPreview(preview) {
-  const info = el('div', {}, el('p', { text: preview.filename + ' · ' + preview.pages + ' стр. · ' + preview.period.from + ' — ' + preview.period.to }), el('p', { text: 'Всего: ' + preview.summary.total + '. Новых учтённых: ' + preview.summary.recorded + '. На проверку: ' + preview.summary.review + '. Возможных повторов: ' + preview.summary.duplicates + '. Уже в базе: ' + preview.summary.existing + '.' }), el('p', { class: 'subtle', text: preview.note }));
+  const info = el('div', {}, el('p', { text: preview.source + ' · ' + preview.filename + ' · ' + (preview.sheets ? preview.sheets + ' лист' : preview.pages + ' стр.') + ' · ' + preview.period.from + ' — ' + preview.period.to }), el('p', { text: 'Всего: ' + preview.summary.total + '. Новых учтённых: ' + preview.summary.recorded + '. На проверку: ' + preview.summary.review + '. Возможных повторов: ' + preview.summary.duplicates + '. Исключено: ' + (preview.summary.ignored || 0) + '. Уже в базе: ' + preview.summary.existing + '.' }), el('p', { class: 'subtle', text: preview.note }));
   const body = el('tbody'), table = el('div', { class: 'table-wrap' }, el('table', {}, el('thead', {}, el('tr', {}, ...['Дата', 'Магазин / сервис', 'Сумма', 'Учёт'].map(text => el('th', { text })))), body));
   let offset = 0;
   const more = button('Показать ещё строки', () => addRows(), true);

@@ -25,6 +25,12 @@ public final class PdfTests {
         check(PdfRules.filename("\n\r").equals("Выписка.pdf"));
         check(PdfRules.filename("выписка").equals("выписка.pdf"));
         check(PdfRules.filename(new String(new char[300]).replace('\0', 'a')).length() <= 200);
+        check(PdfRules.filename("../../20260101_20261007.xlsx").equals("20260101_20261007.xlsx"));
+        byte[] excel = new byte[]{'P', 'K', 3, 4, 0, (byte)255, (byte)128}; ByteArrayOutputStream spreadsheet = new ByteArrayOutputStream();
+        check(PdfRules.copy(new ByteArrayInputStream(excel), spreadsheet, true) == excel.length);
+        check(Arrays.equals(excel, spreadsheet.toByteArray()));
+        try { PdfRules.copy(new ByteArrayInputStream(original), new ByteArrayOutputStream(), true); throw new AssertionError("PDF accepted as Excel"); } catch (IOException expected) { checks++; }
+        try { PdfRules.copy(new ByteArrayInputStream(excel), new ByteArrayOutputStream()); throw new AssertionError("Excel accepted as PDF"); } catch (IOException expected) { checks++; }
         System.out.println("PDF sharing checks: " + checks);
     }
 }

@@ -55,9 +55,9 @@ public final class WebActivity extends Activity {
                 if (!SyncConfig.sameOrigin(SyncConfig.url(WebActivity.this), view.getUrl())) return false;
                 if (fileCallback != null) fileCallback.onReceiveValue(null);
                 fileCallback = callback;
-                Intent choose = new Intent(Intent.ACTION_OPEN_DOCUMENT); choose.addCategory(Intent.CATEGORY_OPENABLE); choose.setType("application/pdf");
+                Intent choose = new Intent(Intent.ACTION_OPEN_DOCUMENT); choose.addCategory(Intent.CATEGORY_OPENABLE); choose.setType("*/*"); choose.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"application/pdf", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
                 try { startActivityForResult(choose, 83); }
-                catch (Exception error) { fileCallback.onReceiveValue(null); fileCallback = null; Toast.makeText(WebActivity.this, "Не удалось открыть выбор PDF.", Toast.LENGTH_LONG).show(); }
+                catch (Exception error) { fileCallback.onReceiveValue(null); fileCallback = null; Toast.makeText(WebActivity.this, "Не удалось открыть выбор PDF или Excel.", Toast.LENGTH_LONG).show(); }
                 return true;
             }
         });
