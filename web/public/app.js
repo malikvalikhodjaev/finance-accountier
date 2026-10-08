@@ -1,7 +1,8 @@
 'use strict';
 const app = document.querySelector('#app'), dialog = document.querySelector('#dialog'), dialogForm = document.querySelector('#dialog-form'), content = document.querySelector('#dialog-content'), dialogError = document.querySelector('#dialog-error');
-const names = { date: 'Дата', time: 'Время', merchant: 'Магазин / сервис', amount_minor: 'Сумма', currency: 'Валюта', kind: 'Тип', category: 'Категория', purpose: 'На что', state: 'Учёт', description: 'Описание', source_name: 'Источник', card_suffix: 'Карта', balance_minor: 'Остаток' };
+const names = { date: 'Дата', time: 'Время', merchant: 'Магазин / отправитель', amount_minor: 'Сумма', currency: 'Валюта', kind: 'Тип', flow: 'Движение', category: 'Категория', purpose: 'На что', state: 'Учёт', description: 'Описание', source_name: 'Источник', card_suffix: 'Карта', balance_minor: 'Остаток' };
 const kinds = { expense: 'Расход', income: 'Доход', transfer: 'Свои деньги', unknown: 'Уточнить' }, statuses = { recorded: 'Учтено', review: 'Уточнить', duplicate: 'Возможный повтор', ignored: 'Исключено' };
+const flows = { incoming: 'Поступление', outgoing: 'Списание', unknown: 'Не определено' };
 const defaults = ['date', 'merchant', 'amount_minor', 'currency', 'kind', 'category', 'purpose', 'state'];
 const state = { meta: null, tab: new URL(location.href).searchParams.get('tab') === 'dashboard' ? 'dashboard' : 'table', filters: { period: 'all' }, columns: [...defaults], viewId: '', boardId: 'main', rows: [], total: 0, offset: 0, generation: 0 };
 let saveDialog, timer, tablePanel, dialogGeneration = 0;
@@ -59,14 +60,15 @@ function filterForm(onChange) {
   const search = el('input', { type: 'search', value: state.filters.search || '', 'aria-label': 'Поиск в операциях' });
   const currency = select([['', 'Все валюты'], ...state.meta.currencies.map(code => [code, code])], state.filters.currency || '');
   const kind = select([['', 'Все типы'], ...Object.entries(kinds)], state.filters.kind || '');
+  const flow = select([['', 'Все движения'], ...Object.entries(flows)], state.filters.flow || '');
   const status = select([['', 'Все состояния'], ...Object.entries(statuses)], state.filters.state || '');
   const from = el('input', { type: 'date', value: state.filters.from || '', 'aria-label': 'Начальная дата' }), to = el('input', { type: 'date', value: state.filters.to || '', 'aria-label': 'Конечная дата' });
   const category = select([['', 'Все категории'], ...state.meta.categories.map(value => [value, value])], state.filters.category || '');
-  const controls = { period, currency, kind, state: status, from, to, category };
+  const controls = { period, currency, kind, flow, state: status, from, to, category };
   for (const [key, control] of Object.entries(controls)) control.onchange = () => { state.filters[key] = control.value; if (key === 'period') { state.filters.from = ''; state.filters.to = ''; from.value = ''; to.value = ''; } state.viewId = ''; onChange(); };
   let debounce; search.oninput = () => { state.filters.search = search.value; state.viewId = ''; clearTimeout(debounce); debounce = setTimeout(onChange, 250); };
   const extra = el('div', { class: 'filters-extra' }), disclosure = el('details', { class: 'extra-filters' }, el('summary', { text: 'Дополнительные фильтры' }), extra); disclosure.open = window.innerWidth > 700;
-  for (const [label, control] of [['Период', period], ['Поиск', search], ['Валюта', currency], ['Тип', kind], ['Учёт', status], ['С даты', from], ['По дату', to], ['Категория', category]]) { const item = el('label', { class: control === search ? 'search' : '' }, label, control); (control === period || control === search ? form : extra).append(item); }
+  for (const [label, control] of [['Период', period], ['Поиск', search], ['Валюта', currency], ['Движение', flow], ['Тип', kind], ['Учёт', status], ['С даты', from], ['По дату', to], ['Категория', category]]) { const item = el('label', { class: control === search ? 'search' : '' }, label, control); (control === period || control === search ? form : extra).append(item); }
   if (state.meta.fields.some(field => field.active)) {
     const custom = select([['', 'Без фильтра'], ...state.meta.fields.filter(field => field.active).map(field => [field.id, field.name])], state.filters.customField || ''), valueBox = el('label', {}, 'Значение колонки');
     const valueControl = () => {
@@ -159,6 +161,7 @@ async function loadRows(append = false) {
       let value = key.startsWith('f_') ? row.custom[key] : row[key];
       if (['amount_minor', 'balance_minor'].includes(key)) value = money(value);
       else if (key === 'kind') value = kinds[value] || '—';
+      else if (key === 'flow') value = flows[value] || 'Не определено';
       else if (key === 'state') value = el('span', { class: 'pill ' + row.state, text: statuses[row.state] });
       else if (typeof value === 'boolean') value = value ? 'Да' : 'Нет';
       tr.append(el('td', { class: ['amount_minor', 'balance_minor'].includes(key) ? 'amount' : ['merchant', 'purpose', 'description'].includes(key) ? 'text-cell' : '' }, value ?? '—'));
@@ -168,8 +171,8 @@ async function loadRows(append = false) {
   tablePanel.append(el('div', { class: 'table-wrap' }, el('table', {}, el('thead', {}, head), body)));
   if (state.rows.length < state.total) tablePanel.append(button('Показать ещё', () => loadRows(true), true));
 }
-async function editRow(id) {
-  const detail = id ? await api('/api/events/' + id) : null, row = detail?.row || { date: today(), amount_minor: null, currency: 'UZS', kind: 'expense', state: 'recorded', category: '', purpose: '', merchant: '', description: '', custom: {} };
+async function editRow(id, preset = {}) {
+  const detail = id ? await api('/api/events/' + id) : null, row = detail?.row || { date: today(), amount_minor: null, currency: 'UZS', kind: 'expense', state: 'recorded', category: '', purpose: '', merchant: '', description: '', custom: {}, ...preset };
   const form = el('div', { class: 'form-grid' }), controls = {};
   controls.amount = el('input', { value: amountInput(row.amount_minor), inputmode: 'decimal', required: row.state === 'recorded' });
   controls.currency = el('input', { value: row.currency || 'UZS', maxlength: '3', required: true });
@@ -177,7 +180,7 @@ async function editRow(id) {
   controls.kind = select(Object.entries(kinds), row.kind || 'unknown'); controls.state = select(Object.entries(statuses), row.state);
   controls.state.onchange = () => controls.amount.required = controls.state.value === 'recorded';
   for (const key of ['merchant', 'category', 'purpose', 'description']) controls[key] = el(key === 'description' ? 'textarea' : 'input', { value: row[key] || '', maxlength: key === 'purpose' ? '240' : key === 'category' ? '120' : '500' });
-  for (const [label, key] of [['Сумма', 'amount'], ['Валюта', 'currency'], ['Дата', 'date'], ['Тип', 'kind'], ['Учёт', 'state'], ['Магазин / сервис', 'merchant'], ['Категория', 'category'], ['На что', 'purpose'], ['Описание', 'description']]) form.append(field(label, controls[key], key === 'description'));
+  for (const [label, key] of [['Сумма', 'amount'], ['Валюта', 'currency'], ['Дата', 'date'], ['Тип', 'kind'], ['Учёт', 'state'], ['Магазин / отправитель', 'merchant'], ['Категория', 'category'], ['На что', 'purpose'], ['Описание', 'description']]) form.append(field(label, controls[key], key === 'description'));
   const customControls = {};
   for (const item of state.meta.fields.filter(field => field.active)) {
     const value = row.custom?.[item.id];
@@ -227,7 +230,7 @@ function saveView() {
 function renderDashboard() {
   const board = state.meta.dashboards.find(board => board.id === state.boardId) || state.meta.dashboards[0]; state.boardId = board.id;
   const selectBoard = select(state.meta.dashboards.map(item => [item.id, item.name]), state.boardId); selectBoard.onchange = () => { state.boardId = selectBoard.value; render(); };
-  app.append(el('div', { class: 'toolbar' }, el('div', { class: 'row' }, el('h1', { text: 'Дашборды' }), selectBoard), el('div', { class: 'actions' }, button('Добавить виджет', () => editWidget(null)), button('Новый дашборд', newBoard, true))));
+  app.append(el('div', { class: 'toolbar' }, el('div', { class: 'row' }, el('h1', { text: 'Дашборды' }), selectBoard), el('div', { class: 'actions' }, button('Добавить доход', () => editRow(null, { kind: 'income', category: 'Доход' }), true), button('Добавить виджет', () => editWidget(null)), button('Новый дашборд', newBoard, true))));
   let results = el('div', { class: 'boards' });
   const load = async () => {
     const generation = state.generation, params = query(); params.set('id', state.boardId); const response = await api('/api/dashboard?' + params);
@@ -235,9 +238,11 @@ function renderDashboard() {
     results.replaceChildren();
     for (const widget of response.widgets) {
       const card = el('section', { class: 'widget' }, el('h2', {}, el('span', { text: widget.name }), button('Настроить', () => editWidget(widget.id), true)));
-      if (!widget.data.length) card.append(el('p', { class: 'subtle', text: 'Нет учтённых операций за этот период.' }));
+      if (widget.metric === 'incoming') card.append(el('p', { class: 'subtle', text: 'Пополнения, возвраты и переводы на свои карты. Назначение поступлений можно уточнить отдельно.' }), button('Посмотреть поступления', () => { state.filters = { ...state.filters, flow: 'incoming' }; state.tab = 'table'; if (!state.columns.includes('flow')) state.columns.push('flow'); history.replaceState(null, '', '/'); render(); }, true));
+      if (!widget.data.length) card.append(el('p', { class: 'subtle', text: widget.metric === 'incoming' ? 'За этот период поступления с известной суммой не найдены в загруженных данных.' : 'Нет учтённых операций за этот период.' }));
       for (const item of widget.data) {
         const block = el('div', { class: 'currency-block' }, el('div', { class: 'metric' }, widget.metric === 'count' ? String(item.count) : money(item.amountMinor), el('small', { text: widget.metric === 'count' ? ' операций · ' + item.currency : ' ' + item.currency })));
+        if (widget.metric === 'incoming') block.append(el('p', { class: 'subtle', text: item.count + ' поступлений · назначение нужно уточнить у ' + item.reviewCount }));
         if (widget.group) {
           const bars = el('div', { class: 'bars' }), max = Math.max(1, ...item.groups.map(group => widget.metric === 'count' ? group.count : Number(group.amountMinor)));
           for (const group of item.groups) bars.append(el('div', {}, el('div', { class: 'bar-label' }, el('span', { text: group.label }), el('strong', { text: widget.metric === 'count' ? group.count : money(group.amountMinor) })), el('progress', { max, value: widget.metric === 'count' ? group.count : Number(group.amountMinor), 'aria-label': group.label })));
@@ -257,7 +262,7 @@ function newBoard() {
 }
 function editWidget(id) {
   const board = state.meta.dashboards.find(board => board.id === state.boardId), widget = board.widgets.find(widget => widget.id === id) || { name: 'Мои расходы', metric: 'expense', group: 'category', currency: '', viewId: '' };
-  const label = el('input', { value: widget.name, required: true, maxlength: '80' }), metric = select([['expense', 'Сумма расходов'], ['income', 'Сумма доходов'], ['transfer', 'Перемещения своих денег'], ['count', 'Количество операций']], widget.metric), group = select([['', 'Общий итог'], ['category', 'Категории'], ['merchant', 'Магазины / сервисы'], ['day', 'Дни'], ['month', 'Месяцы'], ...state.meta.fields.filter(field => field.active).map(field => [field.id, field.name])], widget.group), currency = select([['', 'Все валюты, отдельно'], ...[...new Set(['UZS', 'USD', ...state.meta.currencies])].map(code => [code, code])], widget.currency), view = select([['', 'Фильтры дашборда'], ...state.meta.views.map(view => [view.id, view.name])], widget.viewId || '');
+  const label = el('input', { value: widget.name, required: true, maxlength: '80' }), metric = select([['expense', 'Сумма расходов'], ['income', 'Подтверждённые доходы'], ['incoming', 'Все поступления на карты'], ['transfer', 'Перемещения своих денег'], ['count', 'Количество операций']], widget.metric), group = select([['', 'Общий итог'], ['category', 'Категории'], ['merchant', 'Магазины / сервисы'], ['day', 'Дни'], ['month', 'Месяцы'], ...state.meta.fields.filter(field => field.active).map(field => [field.id, field.name])], widget.group), currency = select([['', 'Все валюты, отдельно'], ...[...new Set(['UZS', 'USD', ...state.meta.currencies])].map(code => [code, code])], widget.currency), view = select([['', 'Фильтры дашборда'], ...state.meta.views.map(view => [view.id, view.name])], widget.viewId || '');
   const form = el('div', { class: 'form-grid' }, field('Название', label, true), field('Показатель', metric), field('Разбивка', group), field('Валюта', currency), field('Источник / представление', view));
   if (id) form.append(button('Удалить виджет', async () => { await api('/api/dashboards', { method: 'POST', body: { ...board, expectedVersion: board.version, widgets: board.widgets.filter(widget => widget.id !== id) } }); dialog.close(); await loadMeta(); render(); }, true));
   modal(id ? 'Настроить виджет' : 'Добавить виджет', form, async () => { const updated = { id: id || 'widget-' + Date.now() + '-' + Math.random().toString(16).slice(2), name: label.value, metric: metric.value, group: group.value, currency: currency.value, viewId: view.value }; const widgets = id ? board.widgets.map(widget => widget.id === id ? updated : widget) : [...board.widgets, updated]; await api('/api/dashboards', { method: 'POST', body: { ...board, expectedVersion: board.version, widgets } }); await loadMeta(); render(); });

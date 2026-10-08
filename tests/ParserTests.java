@@ -58,6 +58,25 @@ public final class ParserTests {
         check(payment.signature.equals(BankParser.parse(sample("E-Com oplata", "UPAY YANDEX GO", "5000.00")).get(0).signature), "Candidate duplicates use stable bank fields");
         check(payment.signature.equals(BankParser.parse(sample("Platezh", "UPAY YANDEX GO", "5000.00").replace(" balans:123456.78 UZS", "")).get(0).signature), "Missing balance and differing payment label still produce a duplicate candidate");
         check(!payment.signature.equals(BankParser.parse(sample("E-Com oplata", "UPAY YANDEX GO", "5100.00")).get(0).signature), "Different amounts are separate candidates");
+        String humo = "HUMOCARD *1234: popolnenie 150000.25 UZS; TEST BANK P2P; 25-05-04 21:06;  Dostupno: 170000.25 UZS";
+        BankParser.Transaction credit = BankParser.parse(humo).get(0);
+        check(credit.amountMinor == 15000025L && credit.balanceMinor == 17000025L, "HUMO credit amount and balance stay separate and exact");
+        check(credit.date.equals("2025-05-04") && credit.time.equals("21:06"), "HUMO date is YY-MM-DD rather than DD-MM-YY");
+        check(credit.kind.equals("unknown") && credit.operation.equals("Popolnenie scheta"), "HUMO incoming transfers are not automatically income");
+        check(credit.raw.equals(humo) && credit.cardSuffix.equals("1234"), "HUMO raw text and masked card are preserved");
+        check(BankParser.parse(humo.replace("popolnenie", "oplata").replace("TEST BANK P2P", "TEST SHOP")).get(0).kind.equals("expense"), "HUMO purchase recognised");
+        check(BankParser.parse(humo.replace("popolnenie", "oplata").replace("TEST BANK P2P", "UB HUMO2UZCA P")).get(0).kind.equals("unknown"), "HUMO transfer payment remains uncertain");
+        check(BankParser.parse(humo.replace("25-05-04", "25-02-30")).isEmpty(), "Impossible HUMO date rejected");
+        check(BankParser.parse(humo.replace("150000.25", "150000.251")).isEmpty(), "HUMO third decimal rejected");
+        check(BankParser.parse(humo + "; popolnenie 90000 UZS").isEmpty(), "Extra HUMO fields are not silently accepted");
+        String kirim = sample("Kirim", "TEST BANK", "100000.00").replace("summa:", "Miqdor:").replace("balans:", "Qoldiq:");
+        check(BankParser.parse(kirim).get(0).kind.equals("unknown"), "Uzbek UZCARD incoming operation recognised without inventing income");
+        check(BankParser.parse(kirim).get(0).amountMinor == 10000000L, "UZCARD Miqdor amount recognised");
+        check(BankParser.parse(sample("Online to’lov", "TEST SHOP", "1000.00").replace("summa:", "Miqdor:")).get(0).kind.equals("expense"), "Uzbek curly apostrophe accepted");
+        check(BankParser.parse(sample("Popolnenie scheta", "", "1000.00")).get(0).merchant.equals("Отправитель не указан"), "Funding without sender remains usable without inventing a counterparty");
+        check(BankParser.parse(sample("Debit online", "IYB MOBILE EXCHANGE", "1000.00")).get(0).kind.equals("unknown"), "Online conversion is not automatically spending");
+        check(BankParser.parse(sample("OTMENA debit online", "TEST SHOP", "1000.00")).isEmpty(), "Cancellation is not parsed as the original debit");
+        check(BankParser.parse(sample("Vozvrat", "TEST SHOP", "1000.00")).get(0).kind.equals("unknown"), "Refund is not automatically income");
         System.out.println("Passed " + checks + " checks.");
     }
 }

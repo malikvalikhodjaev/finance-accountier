@@ -2,10 +2,12 @@ import { DatabaseSync } from 'node:sqlite';
 import { randomUUID, createHash } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
+import { flowOf } from './flows.mjs';
 
 export const eventKeys = 'id fingerprint signature source_type source_name source_ref received_at event_millis raw_title raw_text raw_fragment state amount_minor currency kind date time merchant card_suffix balance_minor category description review_reason purpose bank_operation'.split(' ');
 export const editableKeys = 'state amount_minor currency kind date time merchant category description review_reason purpose'.split(' ');
 const immutableKeys = eventKeys.filter(key => !editableKeys.includes(key));
+const parserKeys = new Set(['signature', 'card_suffix', 'balance_minor', 'bank_operation']);
 export const hash = value => createHash('sha256').update(value).digest('hex');
 export function fail(message, status = 400, details = null) { const error = new Error(message); error.status = status; error.details = details; throw error; }
 const localDay = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tashkent', year: 'numeric', month: '2-digit', day: '2-digit' });
@@ -60,20 +62,21 @@ export function selectRows(rows, filters = {}) {
     const day = row.date || row.received_at?.slice(0, 10) || '';
     if ((from && day < from) || day > to) return false;
     for (const key of ['kind', 'state', 'currency', 'category', 'merchant']) if (filters[key] && row[key] !== filters[key]) return false;
+    if (filters.flow && flowOf(row) !== filters.flow) return false;
     if (filters.customField && filters.customValue !== undefined && String(row.custom?.[filters.customField] ?? '') !== String(filters.customValue)) return false;
     return !search || ['merchant', 'category', 'description', 'purpose', 'source_name', ...Object.keys(row.custom || {})].map(key => row.custom?.[key] ?? row[key] ?? '').join(' ').toLocaleLowerCase('ru').includes(search);
   }).sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.time || '').localeCompare(a.time || '') || b.received_at.localeCompare(a.received_at));
 }
 export function aggregate(rows, widget, filters) {
-  const selected = selectRows(rows, { ...filters, ...(widget.viewFilters || {}), ...(widget.currency ? { currency: widget.currency } : {}) }).filter(row => row.state === 'recorded' && (widget.metric === 'count' || row.kind === widget.metric));
+  const selected = selectRows(rows, { ...filters, ...(widget.viewFilters || {}), ...(widget.currency ? { currency: widget.currency } : {}) }).filter(row => widget.metric === 'incoming' ? ['recorded', 'review'].includes(row.state) && flowOf(row) === 'incoming' && row.amount_minor > 0 && row.currency && row.date : row.state === 'recorded' && (widget.metric === 'count' || row.kind === widget.metric));
   const currencies = new Map();
   for (const row of selected) {
-    const code = row.currency, item = currencies.get(code) || { currency: code, total: 0n, count: 0, groups: new Map() };
+    const code = row.currency, item = currencies.get(code) || { currency: code, total: 0n, count: 0, reviewCount: 0, groups: new Map() };
     let label = widget.group === 'day' ? row.date : widget.group === 'month' ? row.date.slice(0, 7) : widget.group?.startsWith('f_') ? String(row.custom?.[widget.group] ?? 'Не указано') : widget.group ? row[widget.group] || 'Не указано' : 'Итого';
     const group = item.groups.get(label) || { label, amount: 0n, count: 0 };
-    group.amount += BigInt(row.amount_minor); group.count++; item.total += BigInt(row.amount_minor); item.count++; item.groups.set(label, group); currencies.set(code, item);
+    group.amount += BigInt(row.amount_minor); group.count++; item.total += BigInt(row.amount_minor); item.count++; if (row.state === 'review') item.reviewCount++; item.groups.set(label, group); currencies.set(code, item);
   }
-  return [...currencies.values()].map(item => ({ currency: item.currency, amountMinor: item.total.toString(), count: item.count, groups: [...item.groups.values()].sort((a, b) => ['day', 'month'].includes(widget.group) ? a.label.localeCompare(b.label) : widget.metric === 'count' ? b.count - a.count : a.amount === b.amount ? a.label.localeCompare(b.label) : a.amount > b.amount ? -1 : 1).map(group => ({ label: group.label, amountMinor: group.amount.toString(), count: group.count })) }));
+  return [...currencies.values()].map(item => ({ currency: item.currency, amountMinor: item.total.toString(), count: item.count, reviewCount: item.reviewCount, groups: [...item.groups.values()].sort((a, b) => ['day', 'month'].includes(widget.group) ? a.label.localeCompare(b.label) : widget.metric === 'count' ? b.count - a.count : a.amount === b.amount ? a.label.localeCompare(b.label) : a.amount > b.amount ? -1 : 1).map(group => ({ label: group.label, amountMinor: group.amount.toString(), count: group.count })) }));
 }
 
 export function createStore(filename) {
@@ -121,7 +124,7 @@ export function createStore(filename) {
     if (kind === 'view') { dateRange(data.filters || {}); if (!Array.isArray(data.columns) || data.columns.some(value => typeof value !== 'string')) fail('Некорректные колонки представления.'); }
     if (kind === 'dashboard') {
       if (!Array.isArray(data.widgets) || data.widgets.length > 30) fail('Дашборд содержит до 30 виджетов.');
-      for (const widget of data.widgets) if (!widget.id || typeof widget.name !== 'string' || widget.name.length > 80 || !['expense', 'income', 'transfer', 'count'].includes(widget.metric) || !['', 'category', 'merchant', 'day', 'month', ...settings('field').map(field => field.id)].includes(widget.group) || (widget.currency && !/^[A-Z]{3}$/.test(widget.currency))) fail('Некорректный виджет.');
+      for (const widget of data.widgets) if (!widget.id || typeof widget.name !== 'string' || widget.name.length > 80 || !['expense', 'income', 'incoming', 'transfer', 'count'].includes(widget.metric) || !['', 'category', 'merchant', 'day', 'month', ...settings('field').map(field => field.id)].includes(widget.group) || (widget.currency && !/^[A-Z]{3}$/.test(widget.currency))) fail('Некорректный виджет.');
     }
     const version = (previous?.version || 0) + 1;
     db.prepare('INSERT INTO settings VALUES(?,?,?,?) ON CONFLICT(kind,id) DO UPDATE SET data=excluded.data,version=excluded.version').run(kind, id, JSON.stringify(data), version);
@@ -154,6 +157,22 @@ export function createStore(filename) {
     const event = normaliseEvent({ id, fingerprint: 'web:' + id, source_type: 'web', source_name: 'Веб-таблица', source_ref: 'web', received_at: now, event_millis: Date.now(), raw_title: '', raw_text: '', raw_fragment: '', ...Object.fromEntries(editableKeys.map(key => [key, input.event?.[key] ?? null])), state: input.event?.state || 'recorded' });
     const custom = validateExtras(input.custom || {}), result = save(event, 'web'); db.prepare('INSERT INTO extras VALUES(?,?)').run(id, JSON.stringify(custom)); return { ...result, custom };
   }); }
+  function reparseSms(changes) { return transaction(() => {
+    if (!Array.isArray(changes) || changes.length > 10000) fail('Некорректный пакет повторного разбора SMS.');
+    const results = [];
+    const allowed = new Set(['amount_minor', 'currency', 'date', 'time', 'merchant', 'signature', 'card_suffix', 'balance_minor', 'bank_operation']);
+    for (const change of changes) {
+      const current = get(change.id);
+      if (current.version !== change.expectedVersion || current.version !== 1 || current.source_type !== 'sms' || current.state !== 'review' || current.amount_minor !== null || current.date !== null || current.purpose) fail('SMS уже изменено или разобрано; перечитай запись.', 409);
+      if (!change.fields || Object.keys(change.fields).some(key => !allowed.has(key))) fail('Повторный разбор меняет только распознанные поля.');
+      if (!(change.fields.amount_minor > 0) || !change.fields.date || !change.fields.currency || !/^\d{4}$/.test(change.fields.card_suffix || '')) fail('Не хватает распознанных полей SMS.');
+      const event = normaliseEvent({ ...current, ...change.fields, kind: 'unknown', state: 'review', description: String(change.fields.merchant || '').slice(0, 500), review_reason: flowOf({ ...current, ...change.fields, kind: 'unknown' }) === 'incoming' ? 'Поступление распознано. Уточни: доход, возврат или свои деньги; проверь пересечения с выписками.' : 'SMS распознано повторно. Уточни назначение и проверь пересечения с выписками.' });
+      const previous = JSON.stringify(normaliseEvent(current)), at = new Date().toISOString();
+      db.prepare('INSERT OR IGNORE INTO source_revisions VALUES(?,?,?,?)').run(hash(JSON.stringify([current.id, current.version, previous])), current.id, at, previous);
+      results.push(save(event, 'sms-parser-v2'));
+    }
+    return results;
+  }); }
   function sync(input, deviceId) { return transaction(() => {
     if (!Array.isArray(input.changes) || input.changes.length > 100 || !Number.isSafeInteger(input.cursor) || input.cursor < 0) fail('Некорректный пакет синхронизации.');
     const acknowledgements = [], conflicts = [];
@@ -161,15 +180,19 @@ export function createStore(filename) {
     for (const id of input.resolvedIds || []) storeResolution(id);
     function storeResolution(id) { db.prepare('UPDATE conflicts SET delivered=1 WHERE id=? AND device_id=? AND resolved=1').run(id, deviceId); }
     for (const change of input.changes) {
-      const incoming = normaliseEvent(change.event);
+      let incoming = normaliseEvent(change.event);
       if (!Number.isSafeInteger(change.clientRevision) || change.clientRevision < 1 || !Number.isSafeInteger(change.baseVersion) || change.baseVersion < 0) fail('Некорректная версия операции.');
       const currentRow = db.prepare('SELECT * FROM events WHERE id=?').get(incoming.id);
       let result;
       if (!currentRow) { if (change.baseVersion !== 0) fail('Не найдена прежняя версия операции.', 409); result = save(incoming, deviceId); }
       else {
         const current = normaliseEvent(get(incoming.id));
-        for (const key of immutableKeys) if (incoming[key] !== current[key]) fail('Исходное поле нельзя переписать: ' + key);
         const old = db.prepare('SELECT data FROM history WHERE event_id=? AND version=?').get(incoming.id, change.baseVersion);
+        const base = old ? JSON.parse(old.data) : null;
+        for (const key of immutableKeys) if (incoming[key] !== current[key]) {
+          if (parserKeys.has(key) && base && incoming[key] === base[key]) incoming = { ...incoming, [key]: current[key] };
+          else fail('Исходное поле нельзя переписать: ' + key);
+        }
         const merged = JSON.stringify(current) === JSON.stringify(incoming) ? { merged: current, conflicts: [] } : old ? mergeEvents(JSON.parse(old.data), current, incoming) : { merged: current, conflicts: editableKeys.filter(key => incoming[key] !== current[key]) };
         if (merged.conflicts.length) {
           const partial = save(merged.merged, deviceId);
@@ -198,9 +221,18 @@ export function createStore(filename) {
   }); }
   function all(raw = true) {
     const data = raw ? 'e.data' : "json_remove(e.data,'$.raw_title','$.raw_text','$.raw_fragment')";
-    return db.prepare('SELECT ' + data + " data,e.version,e.seq,COALESCE(x.data,'{}') custom FROM events e LEFT JOIN extras x ON x.event_id=e.id").all().map(row => ({ ...JSON.parse(row.data), version: row.version, seq: row.seq, custom: JSON.parse(row.custom) }));
+    return db.prepare('SELECT ' + data + " data,e.version,e.seq,COALESCE(x.data,'{}') custom FROM events e LEFT JOIN extras x ON x.event_id=e.id").all().map(row => { const event = JSON.parse(row.data); return { ...event, flow: flowOf(event), version: row.version, seq: row.seq, custom: JSON.parse(row.custom) }; });
   }
   if (!settings('view').length) setting('view', { id: 'all', name: 'Все операции', filters: { period: 'all' }, columns: ['date', 'merchant', 'amount_minor', 'currency', 'kind', 'category', 'purpose', 'state'] });
   if (!settings('dashboard').length) setting('dashboard', { id: 'main', name: 'Куда уходят деньги', widgets: [{ id: 'expense', name: 'Расходы', metric: 'expense', group: '', currency: '' }, { id: 'income', name: 'Доходы', metric: 'income', group: '', currency: '' }, { id: 'categories', name: 'По категориям', metric: 'expense', group: 'category', currency: '' }, { id: 'merchants', name: 'Магазины и сервисы', metric: 'expense', group: 'merchant', currency: '' }, { id: 'daily', name: 'По дням', metric: 'expense', group: 'day', currency: '' }] });
-  return { db, transaction, get, all, save, sync, edit, manual, settings, setting, close: () => db.close() };
+  if (!settings('migration-incoming').some(item => item.id === 'main')) {
+    const main = settings('dashboard').find(board => board.id === 'main');
+    if (main && main.widgets.length < 30 && !main.widgets.some(widget => widget.metric === 'incoming')) {
+      const widgets = main.widgets.map(widget => widget.id === 'income' && widget.metric === 'income' && widget.name === 'Доходы' ? { ...widget, name: 'Подтверждённые доходы' } : widget);
+      widgets.splice(Math.max(0, widgets.findIndex(widget => widget.id === 'income') + 1), 0, { id: 'incoming', name: 'Поступления на карты', metric: 'incoming', group: '', currency: '' });
+      setting('dashboard', { ...main, expectedVersion: main.version, widgets });
+    }
+    setting('migration-incoming', { id: 'main', name: 'Поступления на карты: отдельный показатель' });
+  }
+  return { db, transaction, get, all, save, sync, edit, manual, reparseSms, settings, setting, close: () => db.close() };
 }

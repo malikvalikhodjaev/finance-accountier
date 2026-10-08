@@ -4,7 +4,8 @@ import { randomUUID } from 'node:crypto';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { root } from '../workflow.mjs';
-import { createStore, aggregate, normaliseEvent, today } from '../web/store.mjs';
+import { createStore, aggregate, normaliseEvent, selectRows, today } from '../web/store.mjs';
+import { flowOf } from '../web/flows.mjs';
 import { createFinanceServer } from '../web/server.mjs';
 const sample = overrides => normaliseEvent({ id: randomUUID(), fingerprint: randomUUID(), source_type: 'sms', source_name: 'TEST BANK', source_ref: 'TEST', received_at: new Date().toISOString(), event_millis: Date.now(), raw_title: 'TEST BANK', raw_text: 'Pokupka: TEST SHOP. summa:5000.00 UZS', raw_fragment: 'Pokupka: TEST SHOP. summa:5000.00 UZS', state: 'recorded', amount_minor: 500000, currency: 'UZS', kind: 'expense', date: today(), time: '10:00', merchant: 'TEST SHOP', category: 'Без категории', description: 'TEST SHOP', purpose: '', bank_operation: 'Pokupka', ...overrides });
 const push = (store, row, baseVersion = 0, clientRevision = 1, cursor = 0) => store.sync({ cursor, changes: [{ event: row, baseVersion, clientRevision }] }, 'phone-test');
@@ -54,6 +55,54 @@ test('Итоги точны, валюты разделены; переводы, 
   const result = aggregate(rows, { metric: 'expense', group: 'category' }, { period: 'all' });
   assert.equal(result.find(row => row.currency === 'UZS').amountMinor, '12345'); assert.equal(result.find(row => row.currency === 'USD').amountMinor, '100');
   const large = aggregate([sample({ amount_minor: 100000000000000 }), sample({ amount_minor: 100000000000000 })], { metric: 'expense', group: '' }, { period: 'all' }); assert.equal(large[0].amountMinor, '200000000000000');
+});
+
+test('Поступления видны до определения назначения, доходы остаются отдельными; повторы и неизвестное направление исключены', () => {
+  const incoming = overrides => sample({ kind: 'unknown', state: 'review', bank_operation: 'Popolnenie scheta', ...overrides });
+  const rows = [incoming({ amount_minor: 12345 }), incoming({ kind: 'transfer', state: 'recorded', bank_operation: 'Popolnenie nalichnimi v ATM', amount_minor: 100 }), incoming({ bank_operation: 'Поступление', amount_minor: 200 }), incoming({ kind: 'income', state: 'recorded', bank_operation: 'Зачисление Кешбека', amount_minor: 300 }), incoming({ bank_operation: 'Vozvrat', amount_minor: 500 }), incoming({ kind: 'transfer', bank_operation: 'Закрытие/Списание со вклада на ПК VISA UB', amount_minor: 400 }), incoming({ state: 'duplicate', amount_minor: 90000 }), incoming({ state: 'ignored', amount_minor: 80000 }), incoming({ bank_operation: 'Перевод', amount_minor: 70000 }), incoming({ amount_minor: null }), sample({ amount_minor: 60000 })];
+  const snapshot = JSON.stringify(rows);
+  const totals = aggregate(rows, { metric: 'incoming', group: '' }, { period: 'all' });
+  assert.equal(totals[0].amountMinor, '13845'); assert.equal(totals[0].count, 6); assert.equal(totals[0].reviewCount, 4);
+  assert.equal(aggregate(rows, { metric: 'income', group: '' }, { period: 'all' })[0].amountMinor, '300');
+  assert.equal(aggregate(rows, { metric: 'incoming', group: '' }, { period: 'all', state: 'recorded' })[0].amountMinor, '400');
+  assert.equal(flowOf(incoming({ bank_operation: 'Kirim' })), 'incoming'); assert.equal(flowOf(incoming({ bank_operation: 'Kartadan chiqim' })), 'outgoing');
+  assert.equal(flowOf(incoming({ bank_operation: 'OTMENA debit online' })), 'unknown');
+  assert.equal(selectRows(rows, { period: 'all', flow: 'incoming', state: 'recorded' }).length, 2);
+  assert.equal(JSON.stringify(rows), snapshot);
+});
+
+test('Повторный разбор SMS сохраняет источник и старую версию, не подтверждает доход и принимает правку со старой версии телефона', () => {
+  const store = createStore(':memory:');
+  try {
+    const row = sample({ raw_text: 'HUMOCARD *1234: popolnenie 5000.00 UZS; TEST BANK; 25-05-04 21:06; Dostupno: 9000.00 UZS', raw_fragment: 'HUMOCARD *1234: popolnenie 5000.00 UZS; TEST BANK; 25-05-04 21:06; Dostupno: 9000.00 UZS', amount_minor: null, kind: null, currency: null, date: null, time: null, card_suffix: null, signature: null, bank_operation: '', state: 'review' });
+    push(store, row);
+    const fields = { amount_minor: 500000, currency: 'UZS', date: '2025-05-04', time: '21:06', card_suffix: '1234', signature: 'test-signature', bank_operation: 'Popolnenie scheta', merchant: 'TEST BANK', balance_minor: 900000 };
+    const [parsed] = store.reparseSms([{ id: row.id, expectedVersion: 1, fields }]);
+    assert.equal(parsed.raw_text, row.raw_text); assert.equal(parsed.raw_fragment, row.raw_fragment); assert.equal(parsed.fingerprint, row.fingerprint);
+    assert.equal(parsed.state, 'review'); assert.equal(parsed.kind, 'unknown'); assert.equal(parsed.version, 2);
+    assert.equal(aggregate(store.all(false), { metric: 'income', group: '' }, { period: 'all' }).length, 0);
+    assert.equal(aggregate(store.all(false), { metric: 'incoming', group: '' }, { period: 'all' })[0].amountMinor, '500000');
+    const old = store.db.prepare('SELECT previous_json FROM source_revisions WHERE event_id=?').get(row.id);
+    assert.equal(JSON.parse(old.previous_json).amount_minor, null); assert.equal(JSON.parse(old.previous_json).raw_text, row.raw_text);
+    assert.throws(() => store.reparseSms([{ id: row.id, expectedVersion: 2, fields }]), error => error.status === 409);
+    const changed = push(store, { ...row, purpose: 'уточнить поступление' }, 1, 2);
+    assert.equal(changed.conflicts.length, 0); assert.equal(store.get(row.id).purpose, 'уточнить поступление'); assert.equal(store.get(row.id).card_suffix, '1234');
+    assert.throws(() => push(store, { ...row, card_suffix: '9999' }, 1, 3), /Исходное поле/);
+    assert.throws(() => push(store, { ...row, raw_text: 'changed source' }, 1, 3), /Исходное поле/);
+  } finally { store.close(); }
+});
+
+test('Повторный разбор не переписывает ручные правки и откатывает весь пакет при конфликте', () => {
+  const store = createStore(':memory:');
+  try {
+    const a = sample({ amount_minor: null, kind: null, date: null, state: 'review' }), b = sample({ amount_minor: null, kind: null, date: null, state: 'review' });
+    push(store, a); push(store, b); store.edit(b.id, { expectedVersion: 1, event: { purpose: 'ручная заметка' } });
+    const fields = { amount_minor: 100, currency: 'UZS', date: today(), card_suffix: '1234', bank_operation: 'Kirim' };
+    assert.throws(() => store.reparseSms([{ id: a.id, expectedVersion: 1, fields }, { id: b.id, expectedVersion: 1, fields }]), error => error.status === 409);
+    assert.equal(store.get(a.id).version, 1); assert.equal(store.get(a.id).amount_minor, null); assert.equal(store.get(b.id).purpose, 'ручная заметка');
+    assert.equal(store.db.prepare('SELECT count(*) n FROM source_revisions').get().n, 0);
+    assert.throws(() => store.reparseSms([{ id: a.id, expectedVersion: 1, fields: { ...fields, raw_text: 'overwrite' } }]), /распознанные поля/);
+  } finally { store.close(); }
 });
 test('Свои колонки и представления сохраняются; тип и устаревшая запись защищены', () => {
   const store = createStore(':memory:'); try {
