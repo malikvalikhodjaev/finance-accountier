@@ -9,6 +9,29 @@ import { createFinanceServer } from '../web/server.mjs';
 const sample = overrides => normaliseEvent({ id: randomUUID(), fingerprint: randomUUID(), source_type: 'sms', source_name: 'TEST BANK', source_ref: 'TEST', received_at: new Date().toISOString(), event_millis: Date.now(), raw_title: 'TEST BANK', raw_text: 'Pokupka: TEST SHOP. summa:5000.00 UZS', raw_fragment: 'Pokupka: TEST SHOP. summa:5000.00 UZS', state: 'recorded', amount_minor: 500000, currency: 'UZS', kind: 'expense', date: today(), time: '10:00', merchant: 'TEST SHOP', category: 'Без категории', description: 'TEST SHOP', purpose: '', bank_operation: 'Pokupka', ...overrides });
 const push = (store, row, baseVersion = 0, clientRevision = 1, cursor = 0) => store.sync({ cursor, changes: [{ event: row, baseVersion, clientRevision }] }, 'phone-test');
 
+test('37000 операций: пакеты по 100, повтор без удвоения, лёгкие таблицы и точные итоги', () => {
+  const store = createStore(':memory:');
+  try {
+    let cursor = 0, expected = 0n, first;
+    for (let offset=0;offset<37000;offset+=100) {
+      const changes = Array.from({ length:100 }, (_,i) => {
+        const index=offset+i, row=sample({ amount_minor:100+index, kind:index%4===1 ? 'transfer' : 'expense', state:index%4===2 ? 'review' : index%4===3 ? 'duplicate' : 'recorded' });
+        if (index%4===0) expected+=BigInt(row.amount_minor);
+        return { event:row,clientRevision:1,baseVersion:0 };
+      });
+      if (!first) first=changes;
+      const response=store.sync({cursor,changes},'phone-test');
+      assert.equal(response.acknowledgements.length,100); assert.equal(response.changes.length,100); cursor=response.cursor;
+    }
+    store.sync({cursor,changes:first},'phone-test');
+    assert.equal(store.db.prepare('SELECT COUNT(*) count FROM events').get().count,37000);
+    const light=store.all(false); assert.equal(light.length,37000); assert.equal(light[0].raw_text,undefined);
+    assert.equal(store.get(first[0].event.id).raw_text,first[0].event.raw_text);
+    assert.equal(store.get(first[0].event.id).version,1);
+    assert.equal(aggregate(light,{metric:'expense',group:''},{period:'all'})[0].amountMinor,expected.toString());
+  } finally { store.close(); }
+});
+
 test('Повторный пакет и повтор ответа не удваивают операции; исходный текст неизменен', () => {
   const store = createStore(':memory:'); try {
     const row = sample(), initial = push(store, row); assert.equal(initial.acknowledgements[0].version, 1);

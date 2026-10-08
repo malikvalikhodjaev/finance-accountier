@@ -15,12 +15,13 @@ import java.util.UUID;
 
 public final class EventStore extends SQLiteOpenHelper {
     private final Context context;
-    public EventStore(Context context) { super(context, "money.db", null, 3); this.context = context.getApplicationContext(); }
+    public EventStore(Context context) { super(context, "money.db", null, 4); this.context = context.getApplicationContext(); }
     @Override public void onCreate(SQLiteDatabase db) {
         db.execSQL("CREATE TABLE events (id TEXT PRIMARY KEY, fingerprint TEXT UNIQUE NOT NULL, signature TEXT, source_type TEXT NOT NULL, source_name TEXT NOT NULL, source_ref TEXT NOT NULL, received_at TEXT NOT NULL, event_millis INTEGER NOT NULL, raw_title TEXT NOT NULL, raw_text TEXT NOT NULL, raw_fragment TEXT NOT NULL, state TEXT NOT NULL, amount_minor INTEGER, currency TEXT, kind TEXT, date TEXT, time TEXT, merchant TEXT, card_suffix TEXT, balance_minor INTEGER, category TEXT, description TEXT, review_reason TEXT, purpose TEXT NOT NULL DEFAULT '', bank_operation TEXT NOT NULL DEFAULT '')");
         db.execSQL("CREATE INDEX events_signature ON events(signature)");
         db.execSQL("CREATE TABLE revisions (event_id TEXT NOT NULL, changed_at TEXT NOT NULL, previous_json TEXT NOT NULL)");
         syncSchema(db);
+        historyIndexes(db);
     }
     @Override public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
         if (oldVersion == 1 && newVersion >= 2) {
@@ -28,7 +29,14 @@ public final class EventStore extends SQLiteOpenHelper {
             db.execSQL("ALTER TABLE events ADD COLUMN bank_operation TEXT NOT NULL DEFAULT ''");
         }
         if (oldVersion <= 2 && newVersion >= 3) syncSchema(db);
-        if (oldVersion < 1 || newVersion > 3) throw new IllegalStateException("Требуется отдельная миграция хранилища.");
+        if (oldVersion <= 3 && newVersion >= 4) historyIndexes(db);
+        if (oldVersion < 1 || newVersion > 4) throw new IllegalStateException("Требуется отдельная миграция хранилища.");
+    }
+    private void historyIndexes(SQLiteDatabase db) {
+        db.execSQL("CREATE INDEX IF NOT EXISTS events_state_date ON events(state, date, kind)");
+        db.execSQL("CREATE INDEX IF NOT EXISTS events_history_order ON events(COALESCE(date, ''), COALESCE(time, ''), received_at)");
+        db.execSQL("CREATE INDEX IF NOT EXISTS revisions_event ON revisions(event_id, changed_at)");
+        db.execSQL("CREATE INDEX IF NOT EXISTS events_sync_pending ON events(received_at) WHERE local_revision > synced_revision AND sync_conflict = ''");
     }
     private void syncSchema(SQLiteDatabase db) {
         db.execSQL("ALTER TABLE events ADD COLUMN local_revision INTEGER NOT NULL DEFAULT 1");
@@ -40,6 +48,12 @@ public final class EventStore extends SQLiteOpenHelper {
     }
 
     public int capture(String type, String name, String ref, String identity, long millis, String title, String raw) {
+        return capture(type, name, ref, identity, millis, title, raw, false);
+    }
+    int captureHistory(String sender, long millis, String raw) {
+        return capture("sms", sender, sender, sender, millis, sender, raw, true);
+    }
+    private int capture(String type, String name, String ref, String identity, long millis, String title, String raw, boolean history) {
         if (title.length() + raw.length() > 40000 || Formats.authenticationText(title + "\n" + raw)) return 0;
         if (title.isEmpty() && raw.trim().isEmpty()) return 0;
         List<String> fragments = BankParser.fragments(raw);
@@ -75,8 +89,10 @@ public final class EventStore extends SQLiteOpenHelper {
             }
             db.setTransactionSuccessful();
         } finally { db.endTransaction(); }
-        for (String id : promptIds) PaymentPrompts.afterCapture(context, this, id);
-        if (count > 0) SyncJobs.queue(context);
+        if (!history) {
+            for (String id : promptIds) PaymentPrompts.afterCapture(context, this, id);
+            if (count > 0) SyncJobs.queue(context);
+        }
         return count;
     }
     private ContentValues base(String type, String name, String ref, String identity, long millis, String title, String raw, String fragment, int index) {
@@ -106,6 +122,57 @@ public final class EventStore extends SQLiteOpenHelper {
             if (!c.moveToFirst()) throw new IllegalArgumentException("Запись не найдена.");
             return row(c);
         }
+    }
+    public JSONObject statistics() {
+        String question = "purpose = '' AND ((state='recorded' AND kind='expense') OR (state='review' AND kind='unknown' AND (LOWER(bank_operation)='platezh' OR LOWER(bank_operation) LIKE 'spisanie %')))";
+        try (Cursor c = getReadableDatabase().rawQuery("SELECT COUNT(*) total, COALESCE(SUM(state='review'),0) review, COALESCE(SUM(state='duplicate'),0) duplicates, COALESCE(SUM(state='recorded' AND kind='expense' AND category='Без категории'),0) categories, COALESCE(SUM(" + question + "),0) unanswered FROM events", null)) { c.moveToFirst(); return row(c); }
+    }
+    public List<JSONObject> recent(String first, boolean ignored) {
+        List<JSONObject> result = new ArrayList<>();
+        String selection = "(state != 'recorded' OR date >= ?)" + (ignored ? "" : " AND state != 'ignored'");
+        try (Cursor c = getReadableDatabase().query("events", null, selection, new String[]{first}, null, null, "COALESCE(date, '') DESC, COALESCE(time, '') DESC, received_at DESC", "101")) { while (c.moveToNext()) result.add(row(c)); }
+        return result;
+    }
+    public List<JSONObject> summary(String first) {
+        List<JSONObject> result = new ArrayList<>();
+        try (Cursor c = getReadableDatabase().rawQuery("SELECT currency, kind, SUM(amount_minor) amount_minor FROM events WHERE state='recorded' AND date>=? GROUP BY currency,kind", new String[]{first})) { while (c.moveToNext()) result.add(row(c)); }
+        return result;
+    }
+    public List<JSONObject> breakdown(String first, boolean merchant) {
+        List<JSONObject> result = new ArrayList<>();
+        String key = merchant ? "COALESCE(NULLIF(merchant,''),NULLIF(description,''),'Вручную')" : "COALESCE(NULLIF(category,''),'Без категории')";
+        try (Cursor c = getReadableDatabase().rawQuery("SELECT " + key + " label, currency, SUM(amount_minor) amount_minor FROM events WHERE state='recorded' AND kind='expense' AND date>=? GROUP BY " + key + ",currency ORDER BY amount_minor DESC LIMIT 20", new String[]{first})) { while (c.moveToNext()) result.add(row(c)); }
+        return result;
+    }
+    JSONObject historyState() {
+        try (Cursor c = getReadableDatabase().rawQuery("SELECT value FROM sync_state WHERE name='sms_history'", null)) {
+            if (!c.moveToFirst()) return new JSONObject();
+            return new JSONObject(c.getString(0));
+        } catch (org.json.JSONException error) { throw new IllegalStateException(error); }
+    }
+    public List<OwnTransfers.Pair> transferCandidates() {
+        List<OwnTransfers.Item> items=new ArrayList<>();
+        try (Cursor c=getReadableDatabase().rawQuery("SELECT id,card_suffix,currency,amount_minor,date,time,bank_operation,merchant,local_revision,server_version FROM events WHERE state='review' AND kind='unknown' AND source_type='sms' AND sync_conflict='' AND card_suffix IS NOT NULL AND date IS NOT NULL AND time IS NOT NULL",null)) {
+            while (c.moveToNext()) try { items.add(new OwnTransfers.Item(c.getString(0),c.getString(1),c.getString(2),c.getLong(3),c.getString(4),c.getString(5),c.getString(6),c.getString(7),c.getLong(8),c.getLong(9))); } catch (RuntimeException ignored) { }
+        }
+        return OwnTransfers.candidates(items);
+    }
+    public void confirmTransfer(OwnTransfers.Pair pair) {
+        SQLiteDatabase db=getWritableDatabase(); db.beginTransaction();
+        try {
+            for (OwnTransfers.Item item : new OwnTransfers.Item[]{pair.outgoing,pair.incoming}) {
+                JSONObject current=find(item.id);
+                if (!current.optString("state").equals("review") || !current.optString("kind").equals("unknown") || current.optLong("local_revision")!=item.revision || current.optLong("server_version")!=item.serverVersion || !current.optString("sync_conflict").isEmpty())
+                    throw new IllegalArgumentException("Операция изменилась. Перечитай список переводов.");
+                ContentValues value=new ContentValues(); value.put("kind","transfer"); value.put("state","recorded"); value.put("category","Перевод своих денег"); value.put("purpose","Свои деньги"); value.put("review_reason","");
+                revise(item.id,current,value);
+            }
+            db.setTransactionSuccessful();
+        } finally { db.endTransaction(); }
+    }
+    void historyState(JSONObject state) {
+        ContentValues value = new ContentValues(); value.put("name", "sms_history"); value.put("value", state.toString());
+        getWritableDatabase().insertWithOnConflict("sync_state", null, value, SQLiteDatabase.CONFLICT_REPLACE);
     }
     private JSONObject row(Cursor cursor) {
         JSONObject result = new JSONObject();
@@ -187,14 +254,28 @@ public final class EventStore extends SQLiteOpenHelper {
         } finally { db.endTransaction(); }
         SyncJobs.queue(context);
     }
-    public String rawExport() {
-        try {
-            JSONObject root = new JSONObject(); root.put("version", 2); root.put("exportedAt", Instant.now().toString()); root.put("timezone", "Asia/Tashkent");
-            root.put("events", new JSONArray(all()));
-            JSONArray revisions = new JSONArray();
-            try (Cursor c = getReadableDatabase().query("revisions", null, null, null, null, null, "changed_at")) { while (c.moveToNext()) revisions.put(row(c)); }
-            root.put("revisions", revisions); return root.toString(2);
-        } catch (Exception error) { throw new IllegalStateException(error); }
+    public void exportFile(java.io.File file,boolean raw) throws Exception {
+        SQLiteDatabase db=getReadableDatabase(); db.beginTransactionNonExclusive();
+        try (java.io.BufferedWriter writer=java.nio.file.Files.newBufferedWriter(file.toPath(),java.nio.charset.StandardCharsets.UTF_8)) {
+            if (raw) {
+                writer.write("{\"version\":2,\"exportedAt\":"+JSONObject.quote(Instant.now().toString())+",\"timezone\":\"Asia/Tashkent\",\"events\":[");
+                exportArray(writer,db.query("events",null,null,null,null,null,"received_at"));
+                writer.write("],\"revisions\":["); exportArray(writer,db.query("revisions",null,null,null,null,null,"changed_at")); writer.write("]}");
+            } else {
+                writer.write("externalId,date,amount,currency,type,category,description\r\n");
+                try (Cursor c=db.query("events",new String[]{"id","date","amount_minor","currency","kind","category","description","purpose"},"state='recorded'",null,null,null,"date DESC,time DESC,received_at DESC")) {
+                    while (c.moveToNext()) {
+                        String[] fields={c.getString(0),c.getString(1),Formats.amount(c.getLong(2)),c.getString(3),c.getString(4),c.getString(5),PurposeRules.exportDescription(c.isNull(6) ? "" : c.getString(6),c.getString(7))};
+                        for (int i=0;i<fields.length;i++) { if (i>0) writer.write(','); writer.write(Formats.csv(fields[i]==null ? "" : fields[i])); }
+                        writer.write("\r\n");
+                    }
+                }
+            }
+            db.setTransactionSuccessful();
+        } finally { db.endTransaction(); }
+    }
+    private void exportArray(java.io.Writer writer,Cursor cursor) throws Exception {
+        try (Cursor c=cursor) { boolean first=true; while (c.moveToNext()) { if (!first) writer.write(','); writer.write(row(c).toString()); first=false; } }
     }
     public int pendingSync() {
         try (Cursor c = getReadableDatabase().rawQuery("SELECT COUNT(*) FROM events WHERE local_revision > synced_revision", null)) { c.moveToFirst(); return c.getInt(0); }
@@ -212,14 +293,16 @@ public final class EventStore extends SQLiteOpenHelper {
     public JSONObject syncRequest() {
         try {
             JSONObject request = new JSONObject(); request.put("cursor", Long.parseLong(syncState("cursor", "0"))); request.put("resolvedIds", new JSONArray(syncState("resolvedIds", "[]")));
-            JSONArray changes = new JSONArray();
-            try (Cursor c = getReadableDatabase().rawQuery("SELECT * FROM events WHERE local_revision > synced_revision AND sync_conflict = '' ORDER BY received_at LIMIT 20", null)) {
+            JSONArray changes = new JSONArray(); int bytes = 0;
+            try (Cursor c = getReadableDatabase().rawQuery("SELECT * FROM events WHERE local_revision > synced_revision AND sync_conflict = '' ORDER BY received_at LIMIT 100", null)) {
                 while (c.moveToNext()) {
                     JSONObject event = row(c), change = new JSONObject(); change.put("event", SyncData.canonical(event)); change.put("clientRevision", event.optLong("local_revision", 1)); change.put("baseVersion", event.optLong("server_version"));
                     JSONArray revisions = new JSONArray();
                     try (Cursor r = getReadableDatabase().rawQuery("SELECT * FROM revisions WHERE event_id=? ORDER BY changed_at DESC LIMIT 10", new String[]{event.getString("id")})) { while (r.moveToNext()) revisions.put(row(r)); }
                     change.put("revisions", revisions);
-                    if (changes.length() > 0 && changes.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8).length + change.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8).length > 5000000) break;
+                    int size = change.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+                    if (changes.length() > 0 && bytes + size > 1000000) break;
+                    bytes += size;
                     changes.put(change);
                 }
             }
@@ -285,17 +368,8 @@ public final class EventStore extends SQLiteOpenHelper {
     }
     public void resetSync() {
         SQLiteDatabase db = getWritableDatabase(); db.beginTransaction();
-        try { db.execSQL("UPDATE events SET synced_revision=0,server_version=0,server_base='',sync_conflict=''"); db.delete("sync_state", null, null); db.setTransactionSuccessful(); }
+        try { db.execSQL("UPDATE events SET synced_revision=0,server_version=0,server_base='',sync_conflict=''"); db.delete("sync_state", "name != ?", new String[]{"sms_history"}); db.setTransactionSuccessful(); }
         finally { db.endTransaction(); }
-    }
-    public String csvExport() {
-        StringBuilder csv = new StringBuilder("externalId,date,amount,currency,type,category,description\r\n");
-        for (JSONObject entry : all()) if (entry.optString("state").equals("recorded")) {
-            String[] fields = {entry.optString("id"), entry.optString("date"), Formats.amount(entry.optLong("amount_minor")), entry.optString("currency"), entry.optString("kind"), entry.optString("category"), PurposeRules.exportDescription(entry.optString("description"), entry.optString("purpose", ""))};
-            for (int i = 0; i < fields.length; i++) { if (i > 0) csv.append(','); csv.append(Formats.csv(fields[i])); }
-            csv.append("\r\n");
-        }
-        return csv.toString();
     }
     private static String categoryKey(String merchant) { return "category:" + Formats.fingerprint("merchant", "", "", merchant.trim().toLowerCase(Locale.ROOT), ""); }
 }

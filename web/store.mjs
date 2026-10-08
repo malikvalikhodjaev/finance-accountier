@@ -8,7 +8,8 @@ export const editableKeys = 'state amount_minor currency kind date time merchant
 const immutableKeys = eventKeys.filter(key => !editableKeys.includes(key));
 export const hash = value => createHash('sha256').update(value).digest('hex');
 export function fail(message, status = 400, details = null) { const error = new Error(message); error.status = status; error.details = details; throw error; }
-export const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tashkent', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+const localDay = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tashkent', year: 'numeric', month: '2-digit', day: '2-digit' });
+export const today = () => localDay.format(new Date());
 export function validDate(value) {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(value)) || new Date(value + 'T00:00:00Z').toISOString().slice(0, 10) !== value) fail('Некорректная дата.');
   return value;
@@ -185,12 +186,20 @@ export function createStore(filename) {
       acknowledgements.push({ id: incoming.id, clientRevision: change.clientRevision, event: normaliseEvent(result), version: result.version });
       db.prepare('UPDATE conflicts SET resolved=1,delivered=1 WHERE event_id=? AND device_id=? AND client_revision<=?').run(incoming.id, deviceId, change.clientRevision);
     }
-    const log = db.prepare('SELECT * FROM changes WHERE seq>? ORDER BY seq LIMIT 20').all(input.cursor);
-    const changes = log.map(change => ({ seq: change.seq, version: change.version, event: JSON.parse(db.prepare('SELECT data FROM history WHERE event_id=? AND version=?').get(change.event_id, change.version).data) }));
+    const log = db.prepare('SELECT c.seq,c.version,h.data FROM changes c JOIN history h ON h.event_id=c.event_id AND h.version=c.version WHERE c.seq>? ORDER BY c.seq LIMIT 100').all(input.cursor);
+    const changes = []; let bytes = 0;
+    for (const change of log) {
+      const item = { seq: change.seq, version: change.version, event: JSON.parse(change.data) }, size = Buffer.byteLength(JSON.stringify(item));
+      if (changes.length && bytes + size > 1000000) break;
+      changes.push(item); bytes += size;
+    }
     const resolutions = db.prepare('SELECT * FROM conflicts WHERE device_id=? AND resolved=1 AND delivered=0 LIMIT 100').all(deviceId).map(conflict => { const row = get(conflict.event_id); return { resolutionId: conflict.id, id: conflict.event_id, clientRevision: conflict.client_revision, event: normaliseEvent(row), version: row.version }; });
-    return { acknowledgements, conflicts, resolutions, changes, cursor: log.at(-1)?.seq ?? input.cursor, hasMore: !!db.prepare('SELECT 1 FROM changes WHERE seq>? LIMIT 1').get(log.at(-1)?.seq ?? input.cursor) };
+    return { acknowledgements, conflicts, resolutions, changes, cursor: changes.at(-1)?.seq ?? input.cursor, hasMore: !!db.prepare('SELECT 1 FROM changes WHERE seq>? LIMIT 1').get(changes.at(-1)?.seq ?? input.cursor) };
   }); }
-  function all() { return db.prepare('SELECT id FROM events').all().map(row => get(row.id)); }
+  function all(raw = true) {
+    const data = raw ? 'e.data' : "json_remove(e.data,'$.raw_title','$.raw_text','$.raw_fragment')";
+    return db.prepare('SELECT ' + data + " data,e.version,e.seq,COALESCE(x.data,'{}') custom FROM events e LEFT JOIN extras x ON x.event_id=e.id").all().map(row => ({ ...JSON.parse(row.data), version: row.version, seq: row.seq, custom: JSON.parse(row.custom) }));
+  }
   if (!settings('view').length) setting('view', { id: 'all', name: 'Все операции', filters: { period: 'all' }, columns: ['date', 'merchant', 'amount_minor', 'currency', 'kind', 'category', 'purpose', 'state'] });
   if (!settings('dashboard').length) setting('dashboard', { id: 'main', name: 'Куда уходят деньги', widgets: [{ id: 'expense', name: 'Расходы', metric: 'expense', group: '', currency: '' }, { id: 'income', name: 'Доходы', metric: 'income', group: '', currency: '' }, { id: 'categories', name: 'По категориям', metric: 'expense', group: 'category', currency: '' }, { id: 'merchants', name: 'Магазины и сервисы', metric: 'expense', group: 'merchant', currency: '' }, { id: 'daily', name: 'По дням', metric: 'expense', group: 'day', currency: '' }] });
   return { db, transaction, get, all, save, sync, edit, manual, settings, setting, close: () => db.close() };

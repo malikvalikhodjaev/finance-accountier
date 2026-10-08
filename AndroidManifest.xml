@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="uz.rhythm.money" android:versionCode="5" android:versionName="0.3.1">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="uz.rhythm.money" android:versionCode="6" android:versionName="0.4.0">
     <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35" />
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    <uses-permission android:name="android.permission.READ_SMS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -15,6 +16,8 @@
             <intent-filter><action android:name="android.intent.action.SEND" /><category android:name="android.intent.category.DEFAULT" /><data android:mimeType="text/plain" /></intent-filter>
         </activity>
         <activity android:name=".WebActivity" android:exported="false" />
+        <activity android:name=".HistoryActivity" android:exported="false" />
+        <activity android:name=".TransfersActivity" android:exported="false" />
         <service android:name=".SyncJob" android:permission="android.permission.BIND_JOB_SERVICE" android:exported="true" />
         <service android:name=".BankNotifications" android:label="Ритм · сбор банковских уведомлений" android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" android:exported="true">
             <intent-filter><action android:name="android.service.notification.NotificationListenerService" /></intent-filter>

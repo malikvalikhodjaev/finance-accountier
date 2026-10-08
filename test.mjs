@@ -10,9 +10,13 @@ const run = (tool, args) => execFileSync(path.join(jdk, 'bin', tool + '.exe'), a
 run('javac', ['-encoding', 'UTF-8', '--release', '8', '-d', output,
   path.join(root, 'src/uz/rhythm/money/Formats.java'), path.join(root, 'src/uz/rhythm/money/BankParser.java'),
   path.join(root, 'src/uz/rhythm/money/PurposeRules.java'),
+  path.join(root, 'src/uz/rhythm/money/HistoryRules.java'), path.join(root, 'tests/HistoryTests.java'),
+  path.join(root, 'src/uz/rhythm/money/OwnTransfers.java'), path.join(root, 'tests/TransferTests.java'),
   path.join(root, 'tests/ParserTests.java'), path.join(root, 'tests/ParseMessages.java'), path.join(root, 'tests/PurposeTests.java')]);
 run('java', ['-cp', output, 'uz.rhythm.money.ParserTests']);
 run('java', ['-cp', output, 'uz.rhythm.money.PurposeTests']);
+run('java', ['-cp', output, 'uz.rhythm.money.HistoryTests']);
+run('java', ['-cp', output, 'uz.rhythm.money.TransferTests']);
 if (existsSync(path.join(root, '.samples/user-messages.txt'))) {
   run('java', ['-cp', output, 'uz.rhythm.money.ParseMessages', path.join(root, '.samples/user-messages.txt'), path.join(root, 'build/sample-operations.csv')]);
 }

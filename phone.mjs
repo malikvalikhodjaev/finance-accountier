@@ -83,6 +83,7 @@ function permissions(device, profile, packageId) {
   return {
     questions: /android\.permission\.POST_NOTIFICATIONS: granted=true/.test(text),
     sms: /android\.permission\.RECEIVE_SMS: granted=true/.test(text),
+    history: /android\.permission\.READ_SMS: granted=true/.test(text),
     notifications: listeners.split(':').some(listener => listener.startsWith(packageId + '/'))
   };
 }

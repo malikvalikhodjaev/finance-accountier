@@ -109,7 +109,7 @@ export function createFinanceServer({ directory = path.join(root, '.web'), allow
       if (identity.mobile) fail('Открой таблицы внутри приложения.', 403);
       if (req.method === 'POST' && url.pathname === '/api/logout') { const value = req.headers.cookie?.match(/rhythm_session=([A-Za-z0-9_-]{43})/)?.[1]; if (value) store.db.prepare('DELETE FROM sessions WHERE hash=?').run(hash(value)); res.setHeader('Set-Cookie', 'rhythm_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0'); return json(res, 200, { ok: true }); }
       if (req.method === 'GET' && url.pathname === '/api/meta') {
-        const rows = store.all(); return json(res, 200, { fields: store.settings('field'), views: store.settings('view'), dashboards: store.settings('dashboard'), currencies: [...new Set(rows.map(row => row.currency).filter(Boolean))].sort(), categories: [...new Set(rows.map(row => row.category).filter(Boolean))].sort(), devices: store.db.prepare('SELECT id,label,created_at,last_seen,revoked FROM devices').all(), count: rows.length, conflicts: store.db.prepare('SELECT COUNT(*) count FROM conflicts WHERE resolved=0').get().count, url: 'http://' + host + ':' + port });
+        const rows = store.all(false); return json(res, 200, { fields: store.settings('field'), views: store.settings('view'), dashboards: store.settings('dashboard'), currencies: [...new Set(rows.map(row => row.currency).filter(Boolean))].sort(), categories: [...new Set(rows.map(row => row.category).filter(Boolean))].sort(), devices: store.db.prepare('SELECT id,label,created_at,last_seen,revoked FROM devices').all(), count: rows.length, conflicts: store.db.prepare('SELECT COUNT(*) count FROM conflicts WHERE resolved=0').get().count, url: 'http://' + host + ':' + port });
       }
       if (req.method === 'POST' && url.pathname === '/api/pairing') {
         const code = String(randomInt(100000, 1000000)); store.db.prepare('DELETE FROM pairing').run(); store.db.prepare('INSERT INTO pairing VALUES(?,?)').run(hash(code), Date.now() + 300000); return json(res, 201, { code, expiresAt: Date.now() + 300000, url: 'http://' + host + ':' + port });
@@ -118,7 +118,7 @@ export function createFinanceServer({ directory = path.join(root, '.web'), allow
         const input = await body(req); store.db.prepare('UPDATE devices SET revoked=1 WHERE id=?').run(input.id); store.db.prepare('DELETE FROM sessions WHERE device_id=?').run(input.id); return json(res, 200, { ok: true });
       }
       if (req.method === 'GET' && url.pathname === '/api/events') {
-        const rows = selectRows(store.all(), Object.fromEntries(url.searchParams)); const offset = Math.max(0, Number(url.searchParams.get('offset')) || 0), limit = Math.min(200, Math.max(1, Number(url.searchParams.get('limit')) || 100)); return json(res, 200, { rows: rows.slice(offset, offset + limit), total: rows.length });
+        const rows = selectRows(store.all(false), Object.fromEntries(url.searchParams)); const offset = Math.max(0, Number(url.searchParams.get('offset')) || 0), limit = Math.min(200, Math.max(1, Number(url.searchParams.get('limit')) || 100)); return json(res, 200, { rows: rows.slice(offset, offset + limit), total: rows.length });
       }
       if (req.method === 'POST' && url.pathname === '/api/events') return json(res, 201, store.manual(await body(req)));
       if (/^\/api\/events\/[a-f0-9-]{36}$/.test(url.pathname)) {
@@ -128,7 +128,7 @@ export function createFinanceServer({ directory = path.join(root, '.web'), allow
       }
       if (req.method === 'POST' && /^\/api\/(fields|views|dashboards)$/.test(url.pathname)) return json(res, 200, store.setting({ fields: 'field', views: 'view', dashboards: 'dashboard' }[url.pathname.split('/').at(-1)], await body(req)));
       if (req.method === 'GET' && url.pathname === '/api/dashboard') {
-        const board = store.settings('dashboard').find(item => item.id === url.searchParams.get('id')) || store.settings('dashboard')[0], rows = store.all(), filters = Object.fromEntries(url.searchParams);
+        const board = store.settings('dashboard').find(item => item.id === url.searchParams.get('id')) || store.settings('dashboard')[0], rows = store.all(false), filters = Object.fromEntries(url.searchParams);
         return json(res, 200, { board, widgets: board.widgets.map(widget => ({ ...widget, data: aggregate(rows, { ...widget, viewFilters: widget.viewId ? store.settings('view').find(view => view.id === widget.viewId)?.filters : null }, filters) })) });
       }
       if (req.method === 'GET' && url.pathname === '/api/conflicts') return json(res, 200, { conflicts: store.db.prepare('SELECT * FROM conflicts WHERE resolved=0 ORDER BY created_at DESC').all().map(row => ({ ...row, incoming: JSON.parse(row.incoming), fields: JSON.parse(row.fields), current: store.get(row.event_id) })) });

@@ -54,4 +54,18 @@ fresh.execute(re.search(r'db\.execSQL\("(CREATE TABLE events [^"]+)"\)', current
 for sql in upgrade_statements[2:]:
     fresh.execute(sql)
 assert {'local_revision', 'server_version', 'sync_conflict'} <= {row[1] for row in fresh.execute('PRAGMA table_info(events)')}
-print('Migrations 1 -> 3, 2 -> 3 and fresh schema verified: raw texts, exact amounts and revisions preserved; existing rows queued for initial sync.')
+indexes = re.findall(r'db\.execSQL\("(CREATE INDEX IF NOT EXISTS [^"]+)"\)', current)
+assert len(indexes) == 4
+for database in [connection, second]:
+    for sql in indexes:
+        database.execute(sql)
+    assert database.execute('SELECT raw_text FROM events').fetchone()[0] == original['raw_text']
+fresh.execute('CREATE TABLE revisions(event_id TEXT, changed_at TEXT, previous_json TEXT)')
+for sql in indexes:
+    fresh.execute(sql)
+connection.execute('CREATE TABLE sync_state(name TEXT PRIMARY KEY,value TEXT NOT NULL)')
+connection.execute('INSERT INTO sync_state VALUES (?,?)', ('sms_history','{"lastId":200,"scanned":200}'))
+connection.execute('INSERT INTO sync_state VALUES (?,?)', ('cursor','100'))
+connection.execute("DELETE FROM sync_state WHERE name != 'sms_history'")
+assert connection.execute('SELECT value FROM sync_state').fetchone()[0] == '{"lastId":200,"scanned":200}'
+print('Migrations 1 -> 4, 2 -> 4, 3 -> 4 and fresh schema verified: raw texts, exact amounts and revisions preserved; history checkpoint survives changing sync server.')

@@ -46,6 +46,7 @@ public final class MainActivity extends Activity {
     private boolean showIgnored = false;
     private Boolean expandSetup;
     private int topInset, bottomInset;
+    private boolean exporting;
     private final int ink = Color.rgb(27, 42, 36), green = Color.rgb(22, 100, 79);
 
     @Override public void onCreate(Bundle state) {
@@ -135,14 +136,14 @@ public final class MainActivity extends Activity {
             label(shared, "Таблицы и дашборды на компьютере и в приложении. Операции отправятся после подключения к твоему серверу.", 14);
             button(shared, "Подключить общую таблицу", this::configureSync);
         }
-        List<JSONObject> all = store.all();
-        int pending = 0, duplicates = 0, categories = 0, unanswered = 0;
-        for (JSONObject row : all) {
-            if (row.optString("state").equals("review")) pending++;
-            if (row.optString("state").equals("duplicate")) duplicates++;
-            if (row.optString("state").equals("recorded") && row.optString("kind").equals("expense") && row.optString("category").equals("Без категории")) categories++;
-            if (PaymentPrompts.needsAnswer(row)) unanswered++;
-        }
+        LinearLayout history = card(page); heading(history, "История банковских SMS", 20);
+        label(history, "Забрать старые операции с телефона. Переводы и неясные поступления проверяются отдельно от расходов.", 14);
+        JSONObject imported = store.historyState();
+        if (imported.has("total")) label(history, "Просмотрено SMS: " + imported.optInt("scanned") + " из " + imported.optInt("total") + " · Добавлено операций: " + imported.optInt("inserted"), 13);
+        button(history, "Импортировать старые SMS", () -> startActivity(new Intent(this, HistoryActivity.class)));
+        button(history, "Проверить переводы между моими картами", () -> startActivity(new Intent(this, TransfersActivity.class)));
+        JSONObject statistics = store.statistics();
+        int pending = statistics.optInt("review"), duplicates = statistics.optInt("duplicates"), categories = statistics.optInt("categories"), unanswered = statistics.optInt("unanswered");
         label(page, "Уточнить назначение: " + pending + " · Возможные повторы: " + duplicates + " · Без категории: " + categories, 14);
         label(page, "Без ответа «На что?»: " + unanswered + ". Можно дополнить в карточке операции.", 14);
         button(page, "Добавить наличные или другую операцию", () -> edit(null));
@@ -155,17 +156,14 @@ public final class MainActivity extends Activity {
         String first = period == 0 ? "0000-00-00" : LocalDate.now(Formats.ZONE).minusDays(period - 1).toString();
         Map<String, long[]> totals = new LinkedHashMap<>();
         Map<String, Long> byCategory = new LinkedHashMap<>(), byMerchant = new LinkedHashMap<>();
-        for (JSONObject row : all) if (row.optString("state").equals("recorded") && row.optString("date").compareTo(first) >= 0) {
+        for (JSONObject row : store.summary(first)) {
             String code = row.optString("currency"), kind = row.optString("kind");
             long amount = row.optLong("amount_minor");
             long[] sums = totals.get(code); if (sums == null) { sums = new long[3]; totals.put(code, sums); }
             sums[kind.equals("expense") ? 0 : kind.equals("income") ? 1 : 2] += amount;
-            if (kind.equals("expense")) {
-                add(byCategory, row.optString("category", "Без категории") + " · " + code, amount);
-                String merchant = row.optString("merchant", ""); if (merchant.isEmpty()) merchant = row.optString("description", "Вручную");
-                add(byMerchant, merchant + " · " + code, amount);
-            }
         }
+        for (JSONObject row : store.breakdown(first, false)) byCategory.put(row.optString("label") + " · " + row.optString("currency"), row.optLong("amount_minor"));
+        for (JSONObject row : store.breakdown(first, true)) byMerchant.put(row.optString("label") + " · " + row.optString("currency"), row.optLong("amount_minor"));
         LinearLayout summary = card(page);
         heading(summary, period == 0 ? "По всей истории" : "За " + period + " дней", 21);
         if (totals.isEmpty()) label(summary, "Нет учтённых операций за этот период.", 15);
@@ -179,7 +177,7 @@ public final class MainActivity extends Activity {
         heading(page, "Операции и уведомления", 21);
         button(page, showIgnored ? "Скрыть исключённые" : "Показать исключённые", () -> { showIgnored = !showIgnored; render(); });
         int shown = 0;
-        for (JSONObject row : all) {
+        for (JSONObject row : store.recent(first, showIgnored)) {
             String state = row.optString("state");
             if (state.equals("ignored") && !showIgnored) continue;
             String date = row.optString("date", Formats.date(row.optLong("event_millis")));
@@ -348,15 +346,18 @@ public final class MainActivity extends Activity {
         })); dialog.show();
     }
     private void export(boolean raw) {
-        try {
+        if (exporting) { toast("Экспорт ещё готовится."); return; }
+        exporting=true; toast("Готовлю экспорт всей истории…");
+        new Thread(() -> { try {
             File folder = new File(getCacheDir(), "exports"); if (!folder.exists() && !folder.mkdirs()) throw new IllegalStateException("Не удалось создать экспорт.");
             String name = (raw ? "notifications-" : "transactions-") + System.currentTimeMillis() + (raw ? ".json" : ".csv");
-            Files.write(new File(folder, name).toPath(), (raw ? store.rawExport() : store.csvExport()).getBytes(StandardCharsets.UTF_8));
+            try (EventStore exportStore=new EventStore(getApplicationContext())) { exportStore.exportFile(new File(folder,name),raw); }
             Uri uri = Uri.parse("content://uz.rhythm.money.exports/" + name);
             Intent share = new Intent(Intent.ACTION_SEND); share.setType(raw ? "application/json" : "text/csv"); share.putExtra(Intent.EXTRA_STREAM, uri);
             share.setClipData(ClipData.newRawUri("Экспорт", uri)); share.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            startActivity(Intent.createChooser(share, raw ? "Резервная копия содержит исходные сообщения" : "Сохранить операции"));
-        } catch (Exception error) { toast("Не удалось экспортировать: " + error.getMessage()); }
+            runOnUiThread(() -> { exporting=false; if (!isFinishing()) startActivity(Intent.createChooser(share, raw ? "Резервная копия содержит исходные сообщения" : "Сохранить операции")); });
+        } catch (Exception error) { runOnUiThread(() -> { exporting=false; toast("Не удалось экспортировать: " + error.getMessage()); }); }
+        },"finance-export").start();
     }
     private void breakdown(LinearLayout target, String title, Map<String, Long> sums) {
         if (sums.isEmpty()) return;
