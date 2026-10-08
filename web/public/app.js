@@ -5,7 +5,7 @@ const kinds = { expense: 'Расход', income: 'Доход', transfer: 'Сво
 const flows = { incoming: 'Поступление', outgoing: 'Списание', unknown: 'Не определено' };
 const defaults = ['date', 'merchant', 'amount_minor', 'currency', 'kind', 'category', 'purpose', 'state'];
 const initialTab = new URL(location.href).searchParams.get('tab');
-const state = { meta: null, tab: ['table', 'orders'].includes(initialTab) ? initialTab : 'dashboard', filters: { period: 'all' }, columns: [...defaults], viewId: '', boardId: 'main', chartGroup: 'month', chartCurrency: '', rows: [], total: 0, offset: 0, generation: 0 };
+const state = { meta: null, tab: ['table', 'orders'].includes(initialTab) ? initialTab : 'dashboard', filters: { period: 'all' }, columns: [...defaults], viewId: '', boardId: new URL(location.href).searchParams.get('board') || 'economy', chartGroup: 'month', chartCurrency: '', rows: [], total: 0, offset: 0, generation: 0 };
 let saveDialog, timer, tablePanel, dialogGeneration = 0;
 function el(tag, properties = {}, ...children) {
   const element = document.createElement(tag);
@@ -29,8 +29,8 @@ async function api(url, options = {}) {
 }
 function money(value) {
   if (value === null || value === undefined || value === '') return '—';
-  const minor = BigInt(value), integer = minor / 100n, cents = String(minor % 100n).padStart(2, '0');
-  return new Intl.NumberFormat('ru-RU').format(integer) + ',' + cents;
+  const signed = BigInt(value), minor = signed < 0n ? -signed : signed, integer = minor / 100n, cents = String(minor % 100n).padStart(2, '0');
+  return (signed < 0n ? '−' : '') + new Intl.NumberFormat('ru-RU').format(integer) + ',' + cents;
 }
 function amountInput(value) { return value == null ? '' : String(BigInt(value) / 100n) + '.' + String(BigInt(value) % 100n).padStart(2, '0'); }
 function minor(value) {
@@ -230,8 +230,17 @@ function saveView() {
   modal('Сохранить фильтры и колонки', body, async () => { const view = await api('/api/views', { method: 'POST', body: { name: label.value, filters: state.filters, columns: state.columns, ...(replace.checked && current ? { id: current.id, expectedVersion: current.version } : {}) } }); state.viewId = view.id; await loadMeta(); render(); message('Представление сохранено'); });
 }
 function renderDashboard() {
+  if (['economy', 'assets'].includes(state.boardId)) {
+    const choose = select([['economy', 'Моя экономика'], ['assets', 'Активы'], ...state.meta.dashboards.map(item => [item.id, item.name])], state.boardId); choose.setAttribute('aria-label', 'Выбор дашборда');
+    choose.onchange = () => { state.boardId = choose.value; history.replaceState(null, '', '/?tab=dashboard&board=' + encodeURIComponent(state.boardId)); render(); };
+    const panel = el('div'), generation = state.generation;
+    app.append(el('div', { class: 'toolbar' }, el('div', { class: 'row' }, el('h1', { text: state.boardId === 'economy' ? 'Моя экономика' : 'Активы' }), choose)), panel);
+    const selectedBoard = state.boardId;
+    import(selectedBoard === 'economy' ? '/economy-ui.mjs' : '/assets-ui.mjs').then(module => { if (generation === state.generation && state.tab === 'dashboard') return (selectedBoard === 'economy' ? module.renderEconomy : module.renderAssets)(panel, { el, button, money, field, select, api, modal, editRow, state, render, message }); }).catch(error => message(error.message));
+    return;
+  }
   const board = state.meta.dashboards.find(board => board.id === state.boardId) || state.meta.dashboards[0]; state.boardId = board.id;
-  const selectBoard = select(state.meta.dashboards.map(item => [item.id, item.name]), state.boardId); selectBoard.onchange = () => { state.boardId = selectBoard.value; render(); };
+  const selectBoard = select([['economy', 'Моя экономика'], ['assets', 'Активы'], ...state.meta.dashboards.map(item => [item.id, item.name])], state.boardId); selectBoard.setAttribute('aria-label', 'Выбор дашборда'); selectBoard.onchange = () => { state.boardId = selectBoard.value; history.replaceState(null, '', '/?tab=dashboard&board=' + encodeURIComponent(state.boardId)); render(); };
   app.append(el('div', { class: 'toolbar' }, el('div', { class: 'row' }, el('h1', { text: 'Дашборды' }), selectBoard), el('div', { class: 'actions' }, button('Добавить доход', () => editRow(null, { kind: 'income', category: 'Доход' }), true), button('Добавить виджет', () => editWidget(null)), button('Новый дашборд', newBoard, true))));
   let results = el('div', { class: 'boards' }), chart = el('section', { class: 'cashflow widget', 'aria-label': 'График доходов и расходов' }), request = 0;
   const group = select([['day', 'По дням'], ['week', 'По неделям'], ['month', 'По месяцам']], state.chartGroup); group.setAttribute('aria-label', 'Разбивка графика');
