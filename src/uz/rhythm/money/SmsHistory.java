@@ -23,6 +23,8 @@ public final class SmsHistory {
     public static void pause() { paused = true; }
     public static final class Preview {
         public final Map<String, Integer> senders = new LinkedHashMap<>();
+        public final Map<String, HistoryRules.DateRange> senderDates = new LinkedHashMap<>();
+        public final HistoryRules.DateRange dates = new HistoryRules.DateRange();
         public int inbox; public long maxId;
     }
     public static Preview preview(Context context) {
@@ -30,13 +32,19 @@ public final class SmsHistory {
         String configured = CollectorConfig.prefs(context).getString("senders", "").toLowerCase(Locale.ROOT);
         Set<String> extra = new java.util.HashSet<>();
         for (String value : configured.split("[\\n,;]+")) if (!value.trim().isEmpty()) extra.add(value.trim());
-        try (Cursor c = context.getContentResolver().query(Telephony.Sms.CONTENT_URI, new String[]{"_id", "address"}, "type=1", null, "_id ASC")) {
+        try (Cursor c = context.getContentResolver().query(Telephony.Sms.CONTENT_URI, new String[]{"_id", "address", "date"}, "type=1", null, "_id ASC")) {
             if (c == null) throw new IllegalStateException("Телефон не вернул список SMS.");
             while (c.moveToNext()) {
                 preview.inbox++; preview.maxId = Math.max(preview.maxId, c.getLong(0));
+                long received = c.isNull(2) ? 0 : c.getLong(2);
+                preview.dates.include(received);
                 String sender = c.getString(1); if (sender == null) continue;
-                if (HistoryRules.bankSender(sender) || extra.contains(sender.trim().toLowerCase(Locale.ROOT)))
+                if (HistoryRules.bankSender(sender) || extra.contains(sender.trim().toLowerCase(Locale.ROOT))) {
                     preview.senders.put(sender, preview.senders.containsKey(sender) ? preview.senders.get(sender) + 1 : 1);
+                    HistoryRules.DateRange dates = preview.senderDates.get(sender);
+                    if (dates == null) { dates = new HistoryRules.DateRange(); preview.senderDates.put(sender, dates); }
+                    dates.include(received);
+                }
             }
         }
         return preview;

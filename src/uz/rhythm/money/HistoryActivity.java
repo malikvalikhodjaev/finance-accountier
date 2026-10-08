@@ -17,6 +17,9 @@ import org.json.JSONObject;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 
 public final class HistoryActivity extends Activity {
     private final Handler handler = new Handler();
@@ -55,10 +58,10 @@ public final class HistoryActivity extends Activity {
             try {
                 SmsHistory.Preview result=SmsHistory.preview(this);
                 runOnUiThread(() -> {
-                    preview.setText("Входящих SMS на телефоне: "+result.inbox+". Выбери источники истории:");
+                    preview.setText("Входящих SMS на телефоне: "+result.inbox+"\nДаты получения: "+dateRange(result.dates)+"\nЭто сообщения, доступные на этом телефоне. Наличие старых дат подтверждает сохранение части истории, но не полноту переноса со старого телефона.\nВыбери источники истории:");
                     List<CheckBox> boxes=new ArrayList<>();
                     for (Map.Entry<String,Integer> sender : result.senders.entrySet()) {
-                        CheckBox box=new CheckBox(this); box.setText(sender.getKey()+" · "+sender.getValue()+" SMS"); box.setTag(sender.getKey()); box.setChecked(HistoryRules.bankSender(sender.getKey())); page.addView(box); boxes.add(box);
+                        CheckBox box=new CheckBox(this); box.setText(sender.getKey()+" · "+sender.getValue()+" SMS\n"+dateRange(result.senderDates.get(sender.getKey()))); box.setTag(sender.getKey()); box.setChecked(HistoryRules.bankSender(sender.getKey())); page.addView(box); boxes.add(box);
                     }
                     text("Если банка нет в списке, укажи точное имя или номер отправителя SMS:",14);
                     EditText extra=new EditText(this); extra.setHint("Отправитель, по одному на строку"); page.addView(extra);
@@ -84,5 +87,10 @@ public final class HistoryActivity extends Activity {
         status.setText(label+"\nSMS: "+state.optInt("scanned")+" / "+state.optInt("total")+"\nДобавлено операций: "+state.optInt("inserted")+" · Уже были: "+state.optInt("same")+"\nПропущено кодов: "+state.optInt("otp")+" · Служебных: "+state.optInt("other")+"\nВ базе: "+statistics.optInt("total")+" · Уточнить: "+statistics.optInt("review")+" · Возможные повторы: "+statistics.optInt("duplicates")+"\nОжидают отправки на ПК: "+store.pendingSync()+ (state.optString("error").isEmpty() ? "" : "\n"+state.optString("error")));
     }
     private TextView text(String value,int size) { TextView view=new TextView(this); view.setText(value); view.setTextSize(size); view.setTextColor(Color.rgb(27,42,36)); view.setPadding(0,10,0,14); page.addView(view); return view; }
+    private String dateRange(HistoryRules.DateRange dates) {
+        if (dates == null || dates.first == 0) return "даты не указаны";
+        DateTimeFormatter format=DateTimeFormatter.ofPattern("dd.MM.yyyy").withZone(ZoneId.systemDefault());
+        return format.format(Instant.ofEpochMilli(dates.first))+" — "+format.format(Instant.ofEpochMilli(dates.last));
+    }
     private Button button(String title,Runnable action) { Button view=new Button(this); view.setText(title); view.setAllCaps(false); page.addView(view); view.setOnClickListener(v -> action.run()); return view; }
 }
