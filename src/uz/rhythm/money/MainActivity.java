@@ -186,7 +186,7 @@ public final class MainActivity extends Activity {
         button(page, "Обновить", this::render);
         button(page, "Экспорт операций в «Ритм» · CSV", () -> export(false));
         button(page, "Резервная копия с исходными сообщениями · JSON", () -> export(true));
-        label(page, "Версия 0.2 · Хранение на телефоне. Ответ «На что?» относится к конкретной оплате. Автоматической отправки в Telegram пока нет.", 12);
+        label(page, "Версия " + BuildInfo.VERSION + " · Сборка " + BuildInfo.COMMIT + " · Хранение на телефоне. Ответ «На что?» относится к конкретной оплате. Автоматической отправки в Telegram пока нет.", 12);
     }
     private void allowPromptNotifications() {
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {

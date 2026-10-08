@@ -1,14 +1,11 @@
 import pathlib
 import re
 import sqlite3
-import zipfile
 
 root = pathlib.Path(__file__).resolve().parents[1]
-with zipfile.ZipFile(root / 'output' / 'source-0.1.0.zip') as archive:
-    entry = next(name for name in archive.namelist() if name.endswith('EventStore.java'))
-    legacy = archive.read(entry).decode('utf-8')
+legacy = (root / 'tests/fixtures/schema-v1.sql').read_text(encoding='utf-8')
 current = (root / 'src/uz/rhythm/money/EventStore.java').read_text(encoding='utf-8')
-old_statements = re.findall(r'db\.execSQL\("(CREATE [^"]+)"\)', legacy)
+old_statements = [statement.strip() for statement in legacy.split(';') if statement.strip()]
 upgrade_statements = re.findall(r'db\.execSQL\("(ALTER TABLE [^"]+)"\)', current)
 assert len(upgrade_statements) == 2
 connection = sqlite3.connect(':memory:')
