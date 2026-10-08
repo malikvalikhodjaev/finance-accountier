@@ -1,0 +1,46 @@
+import { mkdirSync, readdirSync, existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = path.dirname(fileURLToPath(import.meta.url));
+const locate = (folder, required) => {
+  const parent = path.join(root, '.tools', folder);
+  const found = readdirSync(parent).map(name => path.join(parent, name)).find(candidate => existsSync(path.join(candidate, required)));
+  if (!found) throw new Error('Не найден инструмент ' + required + '. Запусти node bootstrap-tools.mjs.');
+  return found;
+};
+const jdk = locate('jdk', 'bin/java.exe');
+const tools = locate('build-tools', 'aapt2.exe');
+const platform = locate('platform', 'android.jar');
+const build = path.join(root, 'build');
+const classes = path.join(build, 'classes');
+const dex = path.join(build, 'dex');
+const output = path.join(root, 'output');
+const signing = path.join(root, '.signing');
+for (const folder of [build, classes, dex, output, signing]) mkdirSync(folder, { recursive: true });
+const run = (file, args) => execFileSync(file, args, { cwd: root, windowsHide: true, stdio: 'inherit' });
+const java = path.join(jdk, 'bin/java.exe');
+const androidJar = path.join(platform, 'android.jar');
+const src = path.join(root, 'src/uz/rhythm/money');
+const sources = readdirSync(src).filter(name => name.endsWith('.java')).map(name => path.join(src, name));
+run(path.join(jdk, 'bin/javac.exe'), ['-encoding', 'UTF-8', '--release', '8', '-classpath', androidJar, '-d', classes, ...sources]);
+const classesJar = path.join(build, 'classes.jar');
+run(path.join(jdk, 'bin/jar.exe'), ['--create', '--file', classesJar, '-C', classes, '.']);
+run(java, ['-cp', path.join(tools, 'lib/d8.jar'), 'com.android.tools.r8.D8', '--lib', androidJar, '--min-api', '26', '--output', dex, classesJar]);
+const resources = path.join(build, 'resources.zip');
+run(path.join(tools, 'aapt2.exe'), ['compile', '--dir', 'res', '-o', 'build/resources.zip']);
+const unsigned = path.join(build, 'unsigned.apk');
+run(path.join(tools, 'aapt2.exe'), ['link', '-I', path.relative(root, androidJar), '--manifest', 'AndroidManifest.xml', '--min-sdk-version', '26', '--target-sdk-version', '35', '-o', 'build/unsigned.apk', 'build/resources.zip']);
+// jar's update command preserves the linked Android resource table and adds classes.dex.
+run(path.join(jdk, 'bin/jar.exe'), ['--update', '--file', unsigned, '-C', dex, 'classes.dex']);
+const aligned = path.join(build, 'aligned.apk');
+run(path.join(tools, 'zipalign.exe'), ['-f', '-p', '4', 'build/unsigned.apk', 'build/aligned.apk']);
+const key = path.join(signing, 'local.jks');
+if (!existsSync(key)) run(path.join(jdk, 'bin/keytool.exe'), ['-genkeypair', '-keystore', key, '-storepass', 'android', '-keypass', 'android', '-alias', 'rhythm-local', '-keyalg', 'RSA', '-keysize', '2048', '-validity', '3650', '-dname', 'CN=Rhythm Local Development, O=Personal, C=UZ', '-storetype', 'JKS']);
+const apk = path.join(output, 'rhythm-money-0.2.0.apk');
+run(java, ['-jar', path.join(tools, 'lib/apksigner.jar'), 'sign', '--ks', key, '--ks-key-alias', 'rhythm-local', '--ks-pass', 'pass:android', '--key-pass', 'pass:android', '--out', apk, aligned]);
+run(java, ['-jar', path.join(tools, 'lib/apksigner.jar'), 'verify', '--verbose', apk]);
+run(path.join(tools, 'zipalign.exe'), ['-c', '-p', '4', path.relative(root, apk)]);
+run(path.join(tools, 'aapt2.exe'), ['dump', 'badging', path.relative(root, apk)]);
+console.log('APK: ' + apk);

@@ -1,0 +1,9 @@
+.tools/
+build/
+output/
+.signing/
+local.properties
+.samples/
+.phone/
+tests/dashboard-import.mjs
+tests/acceptance/payment-purpose.feature

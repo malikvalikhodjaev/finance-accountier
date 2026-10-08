@@ -1,0 +1,51 @@
+import { mkdir, writeFile } from 'node:fs/promises';
+import { createReadStream, createWriteStream, existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+
+const root = path.dirname(fileURLToPath(import.meta.url));
+const folder = path.join(root, '.tools', 'adb');
+const adb = path.join(folder, 'platform-tools', 'adb.exe');
+const provenance = path.join(folder, 'provenance.json');
+if (existsSync(adb) && existsSync(provenance)) {
+  console.log('ADB уже подготовлен: ' + adb);
+  process.exit(0);
+}
+const repositoryUrl = 'https://dl.google.com/android/repository/repository2-3.xml';
+console.log('Получаю описание стабильного Android SDK Platform Tools с сервера Google.');
+const response = await fetch(repositoryUrl, { signal: AbortSignal.timeout(30000) });
+if (!response.ok) throw new Error('Описание SDK: HTTP ' + response.status);
+const xml = await response.text();
+const packages = [...xml.matchAll(/<remotePackage\b[^>]*\bpath="platform-tools"[^>]*>[\s\S]*?<\/remotePackage>/g)].map(match => match[0]);
+const stable = packages.find(item => /<channelRef\b[^>]*\bref="channel-0"/.test(item));
+if (!stable) throw new Error('Не найден стабильный Platform Tools.');
+const archive = [...stable.matchAll(/<archive>[\s\S]*?<\/archive>/g)].map(match => match[0]).find(item => /<host-os>\s*windows\s*<\/host-os>/.test(item));
+if (!archive) throw new Error('Не найден Windows-архив Platform Tools.');
+const relativeUrl = archive.match(/<url>\s*([^<]+)\s*<\/url>/)?.[1].trim();
+const checksum = archive.match(/<checksum([^>]*)>\s*([a-f0-9]+)\s*<\/checksum>/i);
+const size = Number(archive.match(/<size>\s*(\d+)\s*<\/size>/)?.[1]);
+if (!relativeUrl || !checksum || !Number.isSafeInteger(size) || size <= 0 || size > 100000000) throw new Error('Некорректное описание архива.');
+const url = new URL(relativeUrl, repositoryUrl);
+if (url.origin !== 'https://dl.google.com' || !url.pathname.startsWith('/android/repository/')) throw new Error('Архив вне официального репозитория Google.');
+const hash = checksum[2].toLowerCase();
+const algorithm = checksum[1].match(/\btype="(sha1|sha256)"/)?.[1] || (hash.length === 40 ? 'sha1' : hash.length === 64 ? 'sha256' : '');
+if (!algorithm) throw new Error('Неподдерживаемая контрольная сумма.');
+await mkdir(folder, { recursive: true });
+const archivePath = path.join(folder, 'platform-tools.zip');
+console.log('Загружаю: ' + url.href);
+const download = await fetch(url.href, { signal: AbortSignal.timeout(180000) });
+if (!download.ok) throw new Error('Platform Tools: HTTP ' + download.status);
+await pipeline(Readable.fromWeb(download.body), createWriteStream(archivePath));
+const hasher = createHash(algorithm);
+let bytes = 0;
+for await (const chunk of createReadStream(archivePath)) { bytes += chunk.length; hasher.update(chunk); }
+if (bytes !== size || hasher.digest('hex') !== hash) throw new Error('Размер или контрольная сумма архива не совпали с описанием Google.');
+execFileSync('tar.exe', ['-xf', archivePath, '-C', folder], { windowsHide: true, stdio: 'pipe' });
+if (!existsSync(adb)) throw new Error('После распаковки отсутствует adb.exe.');
+await writeFile(provenance, JSON.stringify({ downloadedAt: new Date().toISOString(), repositoryUrl, url: url.href, algorithm, hash, bytes }, null, 2) + '\n', 'utf8');
+console.log(execFileSync(adb, ['version'], { encoding: 'utf8', windowsHide: true }).trim());
+console.log('Готово: ' + adb);
