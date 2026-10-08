@@ -52,6 +52,7 @@ public final class MainActivity extends Activity {
         super.onCreate(state);
         store = new EventStore(this);
         PaymentPrompts.ensureChannel(this);
+        SyncJobs.periodic(this);
         getWindow().setStatusBarColor(Color.rgb(244, 247, 244));
         getWindow().setNavigationBarColor(Color.rgb(244, 247, 244));
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
@@ -120,6 +121,20 @@ public final class MainActivity extends Activity {
         if (!error.isEmpty()) label(setup, error, 13);
         String promptError = CollectorConfig.prefs(this).getString("promptError", "");
         if (!promptError.isEmpty() && !promptsAllowed && asks) label(setup, promptError, 13);
+        LinearLayout shared = card(page); heading(shared, "Общая база", 20);
+        if (SyncConfig.connected(this)) {
+            label(shared, "Ожидают отправки: " + store.pendingSync() + " · Конфликтов: " + store.syncConflicts(), 13);
+            String lastSync = SyncConfig.prefs(this).getString("lastSync", "");
+            if (!lastSync.isEmpty()) label(shared, "Последняя связь: " + java.time.Instant.parse(lastSync).atZone(Formats.ZONE).format(java.time.format.DateTimeFormatter.ofPattern("dd.MM HH:mm")), 13);
+            String syncError = SyncConfig.prefs(this).getString("error", ""); if (!syncError.isEmpty()) label(shared, syncError, 13);
+            button(shared, "Общая таблица операций", () -> openWeb("table"));
+            button(shared, "Мои дашборды", () -> openWeb("dashboard"));
+            button(shared, "Синхронизировать сейчас", this::syncNow);
+            button(shared, "Настроить связь с компьютером", this::configureSync);
+        } else {
+            label(shared, "Таблицы и дашборды на компьютере и в приложении. Операции отправятся после подключения к твоему серверу.", 14);
+            button(shared, "Подключить общую таблицу", this::configureSync);
+        }
         List<JSONObject> all = store.all();
         int pending = 0, duplicates = 0, categories = 0, unanswered = 0;
         for (JSONObject row : all) {
@@ -186,7 +201,36 @@ public final class MainActivity extends Activity {
         button(page, "Обновить", this::render);
         button(page, "Экспорт операций в «Ритм» · CSV", () -> export(false));
         button(page, "Резервная копия с исходными сообщениями · JSON", () -> export(true));
-        label(page, "Версия " + BuildInfo.VERSION + " · Сборка " + BuildInfo.COMMIT + " · Хранение на телефоне. Ответ «На что?» относится к конкретной оплате. Автоматической отправки в Telegram пока нет.", 12);
+        label(page, "Версия " + BuildInfo.VERSION + " · Сборка " + BuildInfo.COMMIT + " · Операции сохраняются на телефоне и после подключения синхронизируются с твоим ПК.", 12);
+    }
+    private void openWeb(String tab) { Intent intent = new Intent(this, WebActivity.class); intent.putExtra("tab", tab); startActivity(intent); }
+    private void configureSync() {
+        LinearLayout fields = vertical(); fields.setPadding(dp(20), dp(10), dp(20), dp(10));
+        label(fields, "Открой Ритм · деньги на ПК → Подключение → Получить код. Телефон и компьютер должны быть в одной Wi-Fi-сети.", 14);
+        EditText url = input(fields, "Адрес с компьютера", SyncConfig.url(this), InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        EditText code = input(fields, "Шестизначный код", "", InputType.TYPE_CLASS_NUMBER);
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Подключить общую таблицу").setView(fields).setPositiveButton("Подключить", null).setNegativeButton("Отмена", null).create();
+        if (SyncConfig.connected(this)) {
+            Button disconnect = new Button(this); disconnect.setText("Отключить синхронизацию"); disconnect.setAllCaps(false); fields.addView(disconnect);
+            disconnect.setOnClickListener(v -> { SyncJobs.cancel(this); SyncConfig.prefs(this).edit().remove("token").remove("error").apply(); android.webkit.CookieManager.getInstance().removeAllCookies(null); dialog.dismiss(); render(); });
+        }
+        dialog.setOnShowListener(v -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(button -> {
+            String target = url.getText().toString(), pairingCode = code.getText().toString().trim();
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);
+            new Thread(() -> { try {
+                SyncEngine.pair(this, target, pairingCode);
+                runOnUiThread(() -> { dialog.dismiss(); render(); syncNow(); });
+            } catch (Exception error) { runOnUiThread(() -> { dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(true); toast(error.getMessage()); }); } }, "rhythm-pair").start();
+        })); dialog.show();
+    }
+    private void syncNow() {
+        toast("Синхронизирую с общей базой…");
+        new Thread(() -> { try { boolean more = SyncEngine.sync(this); if (more) SyncJobs.queue(this); runOnUiThread(() -> { if (!isFinishing()) { render(); toast("Общая база обновлена"); } }); }
+            catch (Exception error) { runOnUiThread(() -> { if (!isFinishing()) { render(); toast("Нет связи с ПК. Локальные операции сохранены."); } }); } }, "rhythm-sync-now").start();
+    }
+    private void unchanged(JSONObject row) {
+        JSONObject current = store.find(row.optString("id"));
+        if (current.optLong("local_revision") != row.optLong("local_revision") || current.optLong("server_version") != row.optLong("server_version")) throw new IllegalArgumentException("Операция изменилась. Сохрани свой текст и открой карточку заново.");
     }
     private void allowPromptNotifications() {
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
@@ -267,6 +311,7 @@ public final class MainActivity extends Activity {
         AlertDialog dialog = new AlertDialog.Builder(this).setTitle(row.optString("merchant", "Категория")).setView(content).setPositiveButton("Сохранить", null).setNegativeButton("Отмена", null).create();
         dialog.setOnShowListener(v -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(button -> {
             try {
+                unchanged(row);
                 store.saveTransaction(row.optString("id"), Formats.amount(row.optLong("amount_minor")), row.optString("currency"), row.optString("kind"), row.optString("date"), category.getText().toString(), row.optString("description"));
                 dialog.dismiss(); render();
             } catch (RuntimeException error) { toast(error.getMessage()); }
@@ -297,7 +342,7 @@ public final class MainActivity extends Activity {
                 int selected = kind.getSelectedItemPosition(); if (selected == 0) throw new IllegalArgumentException("Выбери: расход, доход или перевод своих денег.");
                 String type = new String[]{"", "expense", "income", "transfer"}[selected];
                 if (manual) store.manual(amount.getText().toString(), currency.getText().toString(), type, date.getText().toString(), category.getText().toString(), description.getText().toString());
-                else store.saveTransaction(row.optString("id"), amount.getText().toString(), currency.getText().toString(), type, date.getText().toString(), category.getText().toString(), description.getText().toString());
+                else { unchanged(row); store.saveTransaction(row.optString("id"), amount.getText().toString(), currency.getText().toString(), type, date.getText().toString(), category.getText().toString(), description.getText().toString()); }
                 dialog.dismiss(); render();
             } catch (RuntimeException error) { toast(error.getMessage()); }
         })); dialog.show();

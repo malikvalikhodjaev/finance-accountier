@@ -5,11 +5,11 @@ import { resolvePhone, phoneProfile, installCurrent } from './phone.mjs';
 
 function privateFiles() {
   const names = git(['ls-files', '--cached', '--others', '--exclude-standard']).split(/\r?\n/);
-  const forbidden = names.filter(name => /^(?:\.signing|\.samples|\.phone|\.tools|build|output)\//.test(name) || ['tests/dashboard-import.mjs', 'tests/acceptance/payment-purpose.feature'].includes(name));
+  const forbidden = names.filter(name => /^(?:\.signing|\.samples|\.phone|\.web|\.tools|build|output)\//.test(name) || ['tests/dashboard-import.mjs', 'tests/acceptance/payment-purpose.feature'].includes(name));
   if (forbidden.length) throw new Error('Личные файлы попали в Git: ' + forbidden.join(', '));
 }
 function validate() {
-  for (const args of [['test.mjs'], ['--test', 'tests/workflow.test.mjs']]) console.log(run(process.execPath, args));
+  for (const args of [['test.mjs'], ['--test', 'tests/workflow.test.mjs', 'tests/web.test.mjs']]) console.log(run(process.execPath, args));
   console.log(run('python', ['tests/migration.py']));
 }
 function build() { console.log(run(process.execPath, ['build.mjs'])); }

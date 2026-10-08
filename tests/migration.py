@@ -7,7 +7,7 @@ legacy = (root / 'tests/fixtures/schema-v1.sql').read_text(encoding='utf-8')
 current = (root / 'src/uz/rhythm/money/EventStore.java').read_text(encoding='utf-8')
 old_statements = [statement.strip() for statement in legacy.split(';') if statement.strip()]
 upgrade_statements = re.findall(r'db\.execSQL\("(ALTER TABLE [^"]+)"\)', current)
-assert len(upgrade_statements) == 2
+assert len(upgrade_statements) == 7
 connection = sqlite3.connect(':memory:')
 for sql in old_statements:
     connection.execute(sql)
@@ -32,9 +32,26 @@ connection.row_factory = sqlite3.Row
 row = dict(connection.execute('SELECT * FROM events').fetchone())
 assert all(row[key] == value for key, value in original.items())
 assert row['purpose'] == '' and row['bank_operation'] == ''
+assert row['local_revision'] == 1 and row['synced_revision'] == 0 and row['server_version'] == 0
+assert row['server_base'] == '' and row['sync_conflict'] == ''
 assert connection.execute('SELECT previous_json FROM revisions').fetchone()[0] == '{"raw":"unchanged"}'
 connection.execute('UPDATE events SET purpose = ? WHERE id = ?', ('обед', 'legacy-payment'))
 updated = dict(connection.execute('SELECT * FROM events').fetchone())
 assert updated['purpose'] == 'обед'
 assert updated['raw_text'] == original['raw_text'] and updated['amount_minor'] == original['amount_minor']
-print('Migration 1 -> 2 verified against the archived schema: amounts, source texts and revision history preserved.')
+second = sqlite3.connect(':memory:')
+for sql in old_statements + upgrade_statements[:2]:
+    second.execute(sql)
+second.execute('INSERT INTO events (' + ','.join(columns) + ') VALUES (' + ','.join('?' for _ in columns) + ')', list(original.values()))
+for sql in upgrade_statements[2:]:
+    second.execute(sql)
+second.row_factory = sqlite3.Row
+row2 = dict(second.execute('SELECT * FROM events').fetchone())
+assert all(row2[key] == value for key, value in original.items())
+assert row2['local_revision'] == 1 and row2['synced_revision'] == 0
+fresh = sqlite3.connect(':memory:')
+fresh.execute(re.search(r'db\.execSQL\("(CREATE TABLE events [^"]+)"\)', current)[1])
+for sql in upgrade_statements[2:]:
+    fresh.execute(sql)
+assert {'local_revision', 'server_version', 'sync_conflict'} <= {row[1] for row in fresh.execute('PRAGMA table_info(events)')}
+print('Migrations 1 -> 3, 2 -> 3 and fresh schema verified: raw texts, exact amounts and revisions preserved; existing rows queued for initial sync.')

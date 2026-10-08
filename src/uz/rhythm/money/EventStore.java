@@ -15,17 +15,28 @@ import java.util.UUID;
 
 public final class EventStore extends SQLiteOpenHelper {
     private final Context context;
-    public EventStore(Context context) { super(context, "money.db", null, 2); this.context = context.getApplicationContext(); }
+    public EventStore(Context context) { super(context, "money.db", null, 3); this.context = context.getApplicationContext(); }
     @Override public void onCreate(SQLiteDatabase db) {
         db.execSQL("CREATE TABLE events (id TEXT PRIMARY KEY, fingerprint TEXT UNIQUE NOT NULL, signature TEXT, source_type TEXT NOT NULL, source_name TEXT NOT NULL, source_ref TEXT NOT NULL, received_at TEXT NOT NULL, event_millis INTEGER NOT NULL, raw_title TEXT NOT NULL, raw_text TEXT NOT NULL, raw_fragment TEXT NOT NULL, state TEXT NOT NULL, amount_minor INTEGER, currency TEXT, kind TEXT, date TEXT, time TEXT, merchant TEXT, card_suffix TEXT, balance_minor INTEGER, category TEXT, description TEXT, review_reason TEXT, purpose TEXT NOT NULL DEFAULT '', bank_operation TEXT NOT NULL DEFAULT '')");
         db.execSQL("CREATE INDEX events_signature ON events(signature)");
         db.execSQL("CREATE TABLE revisions (event_id TEXT NOT NULL, changed_at TEXT NOT NULL, previous_json TEXT NOT NULL)");
+        syncSchema(db);
     }
     @Override public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
-        if (oldVersion == 1 && newVersion == 2) {
+        if (oldVersion == 1 && newVersion >= 2) {
             db.execSQL("ALTER TABLE events ADD COLUMN purpose TEXT NOT NULL DEFAULT ''");
             db.execSQL("ALTER TABLE events ADD COLUMN bank_operation TEXT NOT NULL DEFAULT ''");
-        } else throw new IllegalStateException("Требуется отдельная миграция хранилища.");
+        }
+        if (oldVersion <= 2 && newVersion >= 3) syncSchema(db);
+        if (oldVersion < 1 || newVersion > 3) throw new IllegalStateException("Требуется отдельная миграция хранилища.");
+    }
+    private void syncSchema(SQLiteDatabase db) {
+        db.execSQL("ALTER TABLE events ADD COLUMN local_revision INTEGER NOT NULL DEFAULT 1");
+        db.execSQL("ALTER TABLE events ADD COLUMN synced_revision INTEGER NOT NULL DEFAULT 0");
+        db.execSQL("ALTER TABLE events ADD COLUMN server_version INTEGER NOT NULL DEFAULT 0");
+        db.execSQL("ALTER TABLE events ADD COLUMN server_base TEXT NOT NULL DEFAULT ''");
+        db.execSQL("ALTER TABLE events ADD COLUMN sync_conflict TEXT NOT NULL DEFAULT ''");
+        db.execSQL("CREATE TABLE sync_state (name TEXT PRIMARY KEY, value TEXT NOT NULL)");
     }
 
     public int capture(String type, String name, String ref, String identity, long millis, String title, String raw) {
@@ -65,6 +76,7 @@ public final class EventStore extends SQLiteOpenHelper {
             db.setTransactionSuccessful();
         } finally { db.endTransaction(); }
         for (String id : promptIds) PaymentPrompts.afterCapture(context, this, id);
+        if (count > 0) SyncJobs.queue(context);
         return count;
     }
     private ContentValues base(String type, String name, String ref, String identity, long millis, String title, String raw, String fragment, int index) {
@@ -168,9 +180,12 @@ public final class EventStore extends SQLiteOpenHelper {
             ContentValues revision = new ContentValues();
             revision.put("event_id", id); revision.put("changed_at", Instant.now().toString()); revision.put("previous_json", previous.toString());
             db.insertOrThrow("revisions", null, revision);
+            value.put("local_revision", previous.optLong("local_revision", 1) + 1);
+            value.put("sync_conflict", "");
             if (db.update("events", value, "id = ?", new String[]{id}) != 1) throw new IllegalStateException("Не удалось сохранить запись.");
             db.setTransactionSuccessful();
         } finally { db.endTransaction(); }
+        SyncJobs.queue(context);
     }
     public String rawExport() {
         try {
@@ -180,6 +195,98 @@ public final class EventStore extends SQLiteOpenHelper {
             try (Cursor c = getReadableDatabase().query("revisions", null, null, null, null, null, "changed_at")) { while (c.moveToNext()) revisions.put(row(c)); }
             root.put("revisions", revisions); return root.toString(2);
         } catch (Exception error) { throw new IllegalStateException(error); }
+    }
+    public int pendingSync() {
+        try (Cursor c = getReadableDatabase().rawQuery("SELECT COUNT(*) FROM events WHERE local_revision > synced_revision", null)) { c.moveToFirst(); return c.getInt(0); }
+    }
+    public int syncConflicts() {
+        try (Cursor c = getReadableDatabase().rawQuery("SELECT COUNT(*) FROM events WHERE sync_conflict != ''", null)) { c.moveToFirst(); return c.getInt(0); }
+    }
+    private String syncState(String name, String fallback) {
+        try (Cursor c = getReadableDatabase().rawQuery("SELECT value FROM sync_state WHERE name=?", new String[]{name})) { return c.moveToFirst() ? c.getString(0) : fallback; }
+    }
+    private void putSyncState(String name, String text) {
+        ContentValues value = new ContentValues(); value.put("name", name); value.put("value", text);
+        getWritableDatabase().insertWithOnConflict("sync_state", null, value, SQLiteDatabase.CONFLICT_REPLACE);
+    }
+    public JSONObject syncRequest() {
+        try {
+            JSONObject request = new JSONObject(); request.put("cursor", Long.parseLong(syncState("cursor", "0"))); request.put("resolvedIds", new JSONArray(syncState("resolvedIds", "[]")));
+            JSONArray changes = new JSONArray();
+            try (Cursor c = getReadableDatabase().rawQuery("SELECT * FROM events WHERE local_revision > synced_revision AND sync_conflict = '' ORDER BY received_at LIMIT 20", null)) {
+                while (c.moveToNext()) {
+                    JSONObject event = row(c), change = new JSONObject(); change.put("event", SyncData.canonical(event)); change.put("clientRevision", event.optLong("local_revision", 1)); change.put("baseVersion", event.optLong("server_version"));
+                    JSONArray revisions = new JSONArray();
+                    try (Cursor r = getReadableDatabase().rawQuery("SELECT * FROM revisions WHERE event_id=? ORDER BY changed_at DESC LIMIT 10", new String[]{event.getString("id")})) { while (r.moveToNext()) revisions.put(row(r)); }
+                    change.put("revisions", revisions);
+                    if (changes.length() > 0 && changes.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8).length + change.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8).length > 5000000) break;
+                    changes.put(change);
+                }
+            }
+            request.put("changes", changes); return request;
+        } catch (Exception error) { throw new IllegalStateException(error); }
+    }
+    public void syncResponse(JSONObject request, JSONObject response) {
+        SQLiteDatabase db = getWritableDatabase(); db.beginTransaction();
+        try {
+            JSONArray acknowledgements = response.optJSONArray("acknowledgements");
+            for (int i = 0; acknowledgements != null && i < acknowledgements.length(); i++) {
+                JSONObject ack = acknowledgements.getJSONObject(i), current = find(ack.getString("id")), sent = null;
+                JSONArray batch = request.getJSONArray("changes");
+                for (int j = 0; j < batch.length(); j++) if (batch.getJSONObject(j).getJSONObject("event").getString("id").equals(ack.getString("id"))) sent = batch.getJSONObject(j).getJSONObject("event");
+                JSONObject remote = ack.getJSONObject("event");
+                if (sent != null) {
+                    JSONObject merged = SyncData.mergeAfterAck(current, sent, remote);
+                    ContentValues value = SyncData.values(merged);
+                    value.put("synced_revision", ack.getLong("clientRevision")); value.put("server_version", ack.getLong("version")); value.put("server_base", remote.toString()); value.put("sync_conflict", "");
+                    applySync(db, current, value);
+                }
+            }
+            JSONArray conflicts = response.optJSONArray("conflicts");
+            for (int i = 0; conflicts != null && i < conflicts.length(); i++) {
+                JSONObject conflict = conflicts.getJSONObject(i), current = find(conflict.getString("id"));
+                if (current.optLong("local_revision") != conflict.getLong("clientRevision")) continue;
+                ContentValues value = new ContentValues(); value.put("sync_conflict", conflict.toString()); db.update("events", value, "id=?", new String[]{current.getString("id")});
+            }
+            JSONArray resolvedIds = new JSONArray(), resolutions = response.optJSONArray("resolutions");
+            for (int i = 0; resolutions != null && i < resolutions.length(); i++) {
+                JSONObject resolution = resolutions.getJSONObject(i), current = find(resolution.getString("id"));
+                if (current.optLong("local_revision") == resolution.getLong("clientRevision") && !current.optString("sync_conflict").isEmpty()) {
+                    JSONObject remote = resolution.getJSONObject("event"); ContentValues value = SyncData.values(remote);
+                    value.put("synced_revision", current.optLong("local_revision")); value.put("server_version", resolution.getLong("version")); value.put("server_base", remote.toString()); value.put("sync_conflict", ""); applySync(db, current, value);
+                }
+                resolvedIds.put(resolution.getString("resolutionId"));
+            }
+            JSONArray changes = response.getJSONArray("changes");
+            for (int i = 0; i < changes.length(); i++) {
+                JSONObject change = changes.getJSONObject(i), remote = change.getJSONObject("event"); String id = remote.getString("id");
+                JSONObject current = null; try { current = find(id); } catch (IllegalArgumentException ignored) { }
+                if (current != null && current.optLong("server_version") >= change.getLong("version")) continue;
+                if (current != null && !current.optString("sync_conflict").isEmpty()) continue;
+                JSONObject merged = remote;
+                if (current != null && current.optLong("local_revision") > current.optLong("synced_revision")) {
+                    String base = current.optString("server_base"); if (base.isEmpty()) continue;
+                    merged = SyncData.mergePending(new JSONObject(base), current, remote); if (merged == null) continue;
+                }
+                ContentValues value = SyncData.values(merged); value.put("server_version", change.getLong("version")); value.put("server_base", remote.toString());
+                if (current == null) { value.put("local_revision", 1); value.put("synced_revision", 1); db.insertOrThrow("events", null, value); }
+                else { if (current.optLong("local_revision") <= current.optLong("synced_revision")) value.put("synced_revision", current.optLong("local_revision")); applySync(db, current, value); }
+                PaymentPrompts.cancel(context, id);
+            }
+            putSyncState("cursor", Long.toString(response.getLong("cursor"))); putSyncState("resolvedIds", resolvedIds.toString()); db.setTransactionSuccessful();
+        } catch (Exception error) { throw new IllegalStateException("Не удалось применить синхронизацию; локальные записи сохранены.", error); }
+        finally { db.endTransaction(); }
+    }
+    private void applySync(SQLiteDatabase db, JSONObject previous, ContentValues value) throws Exception {
+        boolean changed = false;
+        for (String key : SyncData.EDITABLE) if (value.containsKey(key) && !SyncData.equal(previous.opt(key), value.get(key))) changed = true;
+        if (changed) { ContentValues revision = new ContentValues(); revision.put("event_id", previous.getString("id")); revision.put("changed_at", Instant.now().toString()); revision.put("previous_json", previous.toString()); db.insertOrThrow("revisions", null, revision); }
+        db.update("events", value, "id=?", new String[]{previous.getString("id")});
+    }
+    public void resetSync() {
+        SQLiteDatabase db = getWritableDatabase(); db.beginTransaction();
+        try { db.execSQL("UPDATE events SET synced_revision=0,server_version=0,server_base='',sync_conflict=''"); db.delete("sync_state", null, null); db.setTransactionSuccessful(); }
+        finally { db.endTransaction(); }
     }
     public String csvExport() {
         StringBuilder csv = new StringBuilder("externalId,date,amount,currency,type,category,description\r\n");
