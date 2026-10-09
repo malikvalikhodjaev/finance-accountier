@@ -65,7 +65,7 @@ dialogForm.onsubmit = async event => {
 async function loadMeta() { state.meta = await api('/api/meta'); }
 function filterForm(onChange) {
   const form = el('div', { class: 'filters' });
-  const period = select([['all', 'Вся история'], ['7', 'Последние 7 дней'], ['30', 'Последние 30 дней'], ['month', 'Этот месяц']], state.filters.period);
+  const period = select([['all', 'Вся история'], ['7', 'Последние 7 дней'], ['30', 'Последние 30 дней'], ['month', 'Этот месяц'], ['custom', 'Выбранные даты']], state.filters.from || state.filters.to ? 'custom' : state.filters.period || 'all');
   const search = el('input', { type: 'search', value: state.filters.search || '', 'aria-label': 'Поиск в операциях' });
   const currency = select([['', 'Все валюты'], ...state.meta.currencies.map(code => [code, code])], state.filters.currency || '');
   const kind = select([['', 'Все типы'], ...Object.entries(kinds)], state.filters.kind || '');
@@ -74,7 +74,15 @@ function filterForm(onChange) {
   const from = el('input', { type: 'date', value: state.filters.from || '', 'aria-label': 'Начальная дата' }), to = el('input', { type: 'date', value: state.filters.to || '', 'aria-label': 'Конечная дата' });
   const category = select([['', 'Все категории'], ...state.meta.categories.map(value => [value, value])], state.filters.category || '');
   const controls = { period, currency, kind, flow, state: status, from, to, category };
-  for (const [key, control] of Object.entries(controls)) control.onchange = () => { state.filters[key] = control.value; if (key === 'period') { state.filters.from = ''; state.filters.to = ''; from.value = ''; to.value = ''; } state.viewId = ''; onChange(); };
+  for (const [key, control] of Object.entries(controls)) control.onchange = () => {
+    state.filters[key] = control.value;
+    if (key === 'period') {
+      if (control.value === 'custom') disclosure.open = true;
+      else { state.filters.from = ''; state.filters.to = ''; from.value = ''; to.value = ''; }
+    }
+    if (key === 'from' || key === 'to') { state.filters.period = 'custom'; period.value = 'custom'; }
+    state.viewId = ''; onChange();
+  };
   let debounce; search.oninput = () => { state.filters.search = search.value; state.viewId = ''; clearTimeout(debounce); debounce = setTimeout(onChange, 250); };
   const extra = el('div', { class: 'filters-extra' }), disclosure = el('details', { class: 'extra-filters' }, el('summary', { text: 'Дополнительные фильтры' }), extra); disclosure.open = window.innerWidth > 700;
   for (const [label, control] of [['Период', period], ['Поиск', search], ['Валюта', currency], ['Движение', flow], ['Тип', kind], ['Учёт', status], ['С даты', from], ['По дату', to], ['Категория', category]]) { const item = el('label', { class: control === search ? 'search' : '' }, label, control); (control === period || control === search ? form : extra).append(item); }
