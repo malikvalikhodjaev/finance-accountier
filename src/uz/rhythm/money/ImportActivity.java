@@ -21,8 +21,7 @@ public final class ImportActivity extends Activity {
     private boolean busy;
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
-        getWindow().setStatusBarColor(Color.WHITE); getWindow().setNavigationBarColor(Color.WHITE);
-        getWindow().getDecorView().setSystemUiVisibility(android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | android.view.View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+        UIStyles.window(this);
         if (state != null) { selected = state.getString("selected"); status = state.getString("status", ""); }
         render();
         if (state == null && Intent.ACTION_SEND.equals(getIntent().getAction())) {
@@ -36,7 +35,7 @@ public final class ImportActivity extends Activity {
     @Override protected void onSaveInstanceState(Bundle state) { super.onSaveInstanceState(state); state.putString("selected", selected); state.putString("status", status); }
     private void render() {
         if (isFinishing() || isDestroyed()) return;
-        ScrollView scroll = new ScrollView(this); page = new LinearLayout(this); page.setOrientation(LinearLayout.VERTICAL); page.setPadding(28, 28, 28, 28); page.setBackgroundColor(Color.WHITE); scroll.addView(page);
+        ScrollView scroll = new ScrollView(this); page = new LinearLayout(this); page.setOrientation(LinearLayout.VERTICAL); page.setPadding(28, 28, 28, 28); page.setBackgroundColor(UIStyles.BACKGROUND); scroll.addView(page);
         scroll.setOnApplyWindowInsetsListener((view, insets) -> { page.setPadding(28, 28 + insets.getSystemWindowInsetTop(), 28, 28 + insets.getSystemWindowInsetBottom()); return insets; }); setContentView(scroll);
         text("Выписки", 26);
         text("Отправь PDF банка или Excel Payme через «Поделиться → Personal Throughput Accounting». Поддерживаются выписка Uzum на английском, история Ipak Yuli и XLSX Payme. Выбери источник, затем проверь операции.", 16);
@@ -54,9 +53,9 @@ public final class ImportActivity extends Activity {
         if (StatementInbox.list(this).isEmpty() && !busy) text("Полученных выписок пока нет.", 16);
         action("К сборщику", () -> { startActivity(new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP)); finish(); }, true);
     }
-    private void text(String value, int size) { TextView label = new TextView(this); label.setText(value); label.setTextSize(size); label.setTextColor(Color.rgb(27,42,36)); label.setPadding(8,18,8,18); page.addView(label); }
+    private void text(String value, int size) { TextView label = new TextView(this); label.setText(value); UIStyles.text(label, size); label.setPadding(8,18,8,18); page.addView(label); }
     private void action(String label, Runnable action) { action(label, action, false); }
-    private void action(String label, Runnable action, boolean always) { Button button = new Button(this); button.setText(label); button.setAllCaps(false); button.setEnabled(always || !busy); button.setOnClickListener(view -> { try { action.run(); } catch (RuntimeException error) { status = error.getMessage(); render(); } }); page.addView(button); }
+    private void action(String label, Runnable action, boolean always) { Button button = new Button(this); button.setText(label); UIStyles.button(button, label.equals("Отправить на проверку") || label.equals("Продолжить проверку")); button.setEnabled(always || !busy); button.setOnClickListener(view -> { try { action.run(); } catch (RuntimeException error) { status = error.getMessage(); render(); } }); LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2); params.setMargins(0, UIStyles.dp(this, 5), 0, UIStyles.dp(this, 5)); page.addView(button, params); }
     private void chooseSource(String id) {
         LinearLayout fields = new LinearLayout(this); fields.setOrientation(LinearLayout.VERTICAL); fields.setPadding(28, 16, 28, 16);
         Spinner bank = new Spinner(this); bank.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, new String[]{"Uzum Bank · выписка на английском", "Ipak Yuli · история", "Payme · Excel"})); fields.addView(bank);

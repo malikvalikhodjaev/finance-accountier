@@ -10,7 +10,6 @@ import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.graphics.Color;
 import android.graphics.Typeface;
-import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Build;
@@ -47,16 +46,13 @@ public final class MainActivity extends Activity {
     private Boolean expandSetup;
     private int topInset, bottomInset;
     private boolean exporting;
-    private final int ink = Color.rgb(27, 42, 36), green = Color.rgb(22, 100, 79);
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         store = new EventStore(this);
         PaymentPrompts.ensureChannel(this);
         SyncJobs.periodic(this);
-        getWindow().setStatusBarColor(Color.rgb(244, 247, 244));
-        getWindow().setNavigationBarColor(Color.rgb(244, 247, 244));
-        getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+        UIStyles.window(this);
         acceptShared(getIntent());
         render();
         openPurposeIntent(getIntent());
@@ -81,7 +77,7 @@ public final class MainActivity extends Activity {
     }
     private void render() {
         ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(true); scroll.setBackgroundColor(Color.rgb(244, 247, 244));
+        scroll.setFillViewport(true); scroll.setBackgroundColor(UIStyles.BACKGROUND);
         page = vertical(); page.setPadding(dp(20), dp(20) + topInset, dp(20), dp(24) + bottomInset);
         scroll.addView(page);
         scroll.setOnApplyWindowInsetsListener((view, insets) -> {
@@ -90,7 +86,7 @@ public final class MainActivity extends Activity {
             return insets;
         });
         setContentView(scroll);
-        heading(page, "Personal Throughput Accounting", 24);
+        heading(page, "Personal Throughput Accounting", 28);
         label(page, "После оплаты — короткий вопрос «На что?». Сумма и магазин уже записаны.", 15);
         LinearLayout setup = card(page);
         boolean access = notificationAccess(), enabled = CollectorConfig.enabled(this);
@@ -151,7 +147,7 @@ public final class MainActivity extends Activity {
         button(page, "Добавить наличные или другую операцию", () -> edit(null));
         LinearLayout periods = new LinearLayout(this); periods.setOrientation(LinearLayout.HORIZONTAL); page.addView(periods);
         for (int days : new int[]{7, 30, 0}) {
-            Button b = new Button(this); b.setText(days == 0 ? "Вся история" : days + " дней"); b.setTextColor(days == period ? green : ink);
+            Button b = new Button(this); b.setText(days == 0 ? "Вся история" : days + " дней"); UIStyles.button(b, days == period);
             periods.addView(b, new LinearLayout.LayoutParams(0, dp(52), 1));
             b.setOnClickListener(v -> { period = days; render(); });
         }
@@ -260,7 +256,7 @@ public final class MainActivity extends Activity {
             LinearLayout choices = new LinearLayout(this); choices.setOrientation(LinearLayout.HORIZONTAL); fields.addView(choices);
             for (int index = start; index < Math.min(start + 2, PurposeRules.CHOICES.length); index++) {
                 String choice = PurposeRules.CHOICES[index];
-                Button button = new Button(this); button.setText(choice); button.setAllCaps(false); button.setTextColor(green);
+                Button button = new Button(this); button.setText(choice); UIStyles.button(button, false);
                 choices.addView(button, new LinearLayout.LayoutParams(0, -2, 1));
                 button.setOnClickListener(v -> {
                     try { store.savePurpose(row.optString("id"), choice); dialog.dismiss(); render(); }
@@ -381,13 +377,13 @@ public final class MainActivity extends Activity {
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
     private LinearLayout vertical() { LinearLayout view = new LinearLayout(this); view.setOrientation(LinearLayout.VERTICAL); return view; }
     private LinearLayout card(LinearLayout parent) {
-        LinearLayout box = vertical(); box.setPadding(dp(16), dp(12), dp(16), dp(14));
-        GradientDrawable background = new GradientDrawable(); background.setColor(Color.WHITE); background.setCornerRadius(dp(16)); box.setBackground(background);
+        LinearLayout box = vertical(); box.setPadding(dp(20), dp(18), dp(20), dp(18));
+        box.setBackground(UIStyles.rounded(this, Color.WHITE, 20, true));
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2); params.setMargins(0, dp(12), 0, dp(12)); parent.addView(box, params); return box;
     }
-    private TextView label(LinearLayout parent, String text, int size) { TextView view = new TextView(this); view.setText(text); view.setTextColor(ink); view.setTextSize(size); view.setPadding(0, dp(5), 0, dp(7)); parent.addView(view); return view; }
-    private void heading(LinearLayout parent, String text, int size) { label(parent, text, size).setTypeface(Typeface.DEFAULT, Typeface.BOLD); }
-    private void button(LinearLayout parent, String text, Runnable action) { Button button = new Button(this); button.setText(text); button.setAllCaps(false); button.setTextColor(green); parent.addView(button, new LinearLayout.LayoutParams(-1, -2)); button.setOnClickListener(v -> action.run()); }
-    private EditText input(LinearLayout parent, String title, String value, int type) { label(parent, title, 12); EditText input = new EditText(this); input.setInputType(type); input.setText(value); input.setTextSize(16); parent.addView(input, new LinearLayout.LayoutParams(-1, -2)); return input; }
+    private TextView label(LinearLayout parent, String text, int size) { TextView view = new TextView(this); view.setText(text); UIStyles.text(view, size); view.setPadding(0, dp(5), 0, dp(7)); parent.addView(view); return view; }
+    private void heading(LinearLayout parent, String text, int size) { label(parent, text, size).setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL)); }
+    private void button(LinearLayout parent, String text, Runnable action) { Button button = new Button(this); button.setText(text); UIStyles.button(button, text.equals("Мои дашборды")); LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2); params.setMargins(0, dp(5), 0, dp(5)); parent.addView(button, params); button.setOnClickListener(v -> action.run()); }
+    private EditText input(LinearLayout parent, String title, String value, int type) { label(parent, title, 12); EditText input = new EditText(this); input.setInputType(type); input.setText(value); UIStyles.input(input); parent.addView(input, new LinearLayout.LayoutParams(-1, -2)); return input; }
     private void toast(String message) { Toast.makeText(this, message == null ? "Не удалось выполнить действие." : message, Toast.LENGTH_LONG).show(); }
 }

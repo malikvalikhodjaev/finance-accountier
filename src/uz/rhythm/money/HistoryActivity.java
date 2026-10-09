@@ -27,9 +27,9 @@ public final class HistoryActivity extends Activity {
     private EventStore store; private LinearLayout page; private boolean scanning;
     private final Runnable refresh = new Runnable() { public void run() { update(); handler.postDelayed(this,1000); } };
     @Override public void onCreate(Bundle state) {
-        super.onCreate(state); store=new EventStore(this);
+        super.onCreate(state); UIStyles.window(this); store=new EventStore(this);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        ScrollView scroll=new ScrollView(this); page=new LinearLayout(this); page.setOrientation(LinearLayout.VERTICAL); page.setPadding(28,60,28,60); page.setBackgroundColor(Color.rgb(244,247,244)); scroll.addView(page); setContentView(scroll);
+        ScrollView scroll=new ScrollView(this); page=new LinearLayout(this); page.setOrientation(LinearLayout.VERTICAL); page.setPadding(28,60,28,60); page.setBackgroundColor(UIStyles.BACKGROUND); scroll.addView(page); setContentView(scroll);
         page.setOnApplyWindowInsetsListener((view,insets) -> { page.setPadding(28,28+insets.getSystemWindowInsetTop(),28,28+insets.getSystemWindowInsetBottom()); return insets; });
         text("История банковских SMS",24);
         text("Импортируются входящие SMS выбранных банков. Исходный текст сохраняется без изменений. Коды подтверждения и служебные сообщения пропускаются. Старые операции не вызывают вопросы «На что?».",15);
@@ -86,11 +86,11 @@ public final class HistoryActivity extends Activity {
         JSONObject statistics=store.statistics();
         status.setText(label+"\nSMS: "+state.optInt("scanned")+" / "+state.optInt("total")+"\nДобавлено операций: "+state.optInt("inserted")+" · Уже были: "+state.optInt("same")+"\nПропущено кодов: "+state.optInt("otp")+" · Служебных: "+state.optInt("other")+"\nВ базе: "+statistics.optInt("total")+" · Уточнить: "+statistics.optInt("review")+" · Возможные повторы: "+statistics.optInt("duplicates")+"\nОжидают отправки на ПК: "+store.pendingSync()+ (state.optString("error").isEmpty() ? "" : "\n"+state.optString("error")));
     }
-    private TextView text(String value,int size) { TextView view=new TextView(this); view.setText(value); view.setTextSize(size); view.setTextColor(Color.rgb(27,42,36)); view.setPadding(0,10,0,14); page.addView(view); return view; }
+    private TextView text(String value,int size) { TextView view=new TextView(this); view.setText(value); UIStyles.text(view,size); view.setPadding(0,10,0,14); page.addView(view); return view; }
     private String dateRange(HistoryRules.DateRange dates) {
         if (dates == null || dates.first == 0) return "даты не указаны";
         DateTimeFormatter format=DateTimeFormatter.ofPattern("dd.MM.yyyy").withZone(ZoneId.systemDefault());
         return format.format(Instant.ofEpochMilli(dates.first))+" — "+format.format(Instant.ofEpochMilli(dates.last));
     }
-    private Button button(String title,Runnable action) { Button view=new Button(this); view.setText(title); view.setAllCaps(false); page.addView(view); view.setOnClickListener(v -> action.run()); return view; }
+    private Button button(String title,Runnable action) { Button view=new Button(this); view.setText(title); UIStyles.button(view,false); LinearLayout.LayoutParams params=new LinearLayout.LayoutParams(-1,-2); params.setMargins(0,UIStyles.dp(this,5),0,UIStyles.dp(this,5)); page.addView(view,params); view.setOnClickListener(v -> action.run()); return view; }
 }
