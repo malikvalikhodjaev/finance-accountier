@@ -85,5 +85,16 @@ export function createEconomy(store) {
     return { changed: rows.length };
   });
   const audit = (before, after) => store.db.prepare('INSERT INTO economy_classification_history VALUES(?,?,?,?,?)').run(after.id, after.version, JSON.stringify(before.custom), JSON.stringify(after.custom), new Date().toISOString());
-  return { fields, readPlan, savePlan, classify, audit, report: filters => economyReport(store.all(false), fields, filters), backup: () => ({ plans: store.db.prepare('SELECT * FROM economy_plans').all(), history: store.db.prepare('SELECT * FROM economy_plan_history').all(), classifications: store.db.prepare('SELECT * FROM economy_classification_history').all() }) };
+  // Explicit earnings entered by the owner on the phone; SMS top-ups never enter this path.
+  // Called only for a new row, inside the sync transaction, so retries preserve later edits.
+  const acceptManualIncome = row => {
+    if (row.source_type !== 'manual' || row.source_ref !== 'manual-earned-v1' || row.kind !== 'income' || row.state !== 'recorded') return;
+    const role = store.settings('field').find(field => field.id === fields.role);
+    if (!role?.options.includes(economyRoles.earned)) return;
+    const custom = { [fields.role]: economyRoles.earned };
+    if (row.merchant) custom[fields.source] = row.merchant;
+    store.db.prepare('INSERT INTO extras VALUES(?,?)').run(row.id, JSON.stringify(custom));
+    audit({ ...row, custom: {} }, { ...row, custom });
+  };
+  return { fields, readPlan, savePlan, classify, audit, acceptManualIncome, report: filters => economyReport(store.all(false), fields, filters), backup: () => ({ plans: store.db.prepare('SELECT * FROM economy_plans').all(), history: store.db.prepare('SELECT * FROM economy_plan_history').all(), classifications: store.db.prepare('SELECT * FROM economy_classification_history').all() }) };
 }

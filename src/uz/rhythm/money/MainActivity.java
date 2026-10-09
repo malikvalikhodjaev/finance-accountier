@@ -52,12 +52,13 @@ public final class MainActivity extends Activity {
         store = new EventStore(this);
         PaymentPrompts.ensureChannel(this);
         SyncJobs.periodic(this);
+        IncomeReminders.initialize(this);
         UIStyles.window(this);
         acceptShared(getIntent());
         render();
         openPurposeIntent(getIntent());
     }
-    @Override public void onResume() { super.onResume(); if (store != null) render(); }
+    @Override public void onResume() { super.onResume(); if (store != null) render(); PromptOverlay.resume(this); }
     @Override public void onDestroy() { if (store != null) store.close(); super.onDestroy(); }
     @Override public void onNewIntent(Intent intent) { super.onNewIntent(intent); setIntent(intent); acceptShared(intent); render(); openPurposeIntent(intent); }
     private void openPurposeIntent(Intent intent) {
@@ -97,7 +98,8 @@ public final class MainActivity extends Activity {
         boolean ready = smsReady || (access && !CollectorConfig.apps(this).isEmpty());
         boolean asks = CollectorConfig.prefs(this).getBoolean("askPurpose", true);
         boolean promptsAllowed = PaymentPrompts.allowed(this);
-        label(setup, "«На что потратил?»: " + (!asks ? "выключено" : promptsAllowed ? "включено · вопрос приходит уведомлением" : "нужно разрешить уведомления"), 13);
+        label(setup, "«На что потратил?»: " + (!asks ? "выключено" : PromptOverlay.allowed(this) ? "окно поверх приложений" : promptsAllowed ? "уведомление · доступ поверх приложений не выдан" : "нужно разрешить показ вопросов"), 13);
+        button(setup, "Окна и поступления", () -> startActivity(new Intent(this, PromptSettingsActivity.class)));
         if (asks && !promptsAllowed) button(setup, "Разрешить вопросы после оплаты", this::allowPromptNotifications);
         boolean expanded = expandSetup == null ? !ready : expandSetup;
         button(setup, expanded ? "Свернуть настройки" : "Настроить сбор", () -> { expandSetup = !expanded; render(); });
@@ -108,7 +110,12 @@ public final class MainActivity extends Activity {
             button(setup, "SMS: задать отправителей", this::configureSms);
             button(setup, asks ? "Выключить вопросы после оплаты" : "Включить вопросы после оплаты", () -> {
                 CollectorConfig.prefs(this).edit().putBoolean("askPurpose", !asks).apply();
-                if (asks) getSystemService(android.app.NotificationManager.class).cancelAll();
+                if (asks) {
+                    PromptOverlay.paused(this);
+                    android.app.NotificationManager manager = getSystemService(android.app.NotificationManager.class);
+                    for (android.service.notification.StatusBarNotification notification : manager.getActiveNotifications())
+                        if (notification.getTag() != null && notification.getTag().startsWith("purpose:")) manager.cancel(notification.getTag(), notification.getId());
+                }
                 else if (!PaymentPrompts.allowed(this)) allowPromptNotifications();
                 render();
             });
@@ -119,6 +126,8 @@ public final class MainActivity extends Activity {
         String promptError = CollectorConfig.prefs(this).getString("promptError", "");
         if (!promptError.isEmpty() && asks) label(setup, promptError, 13);
         LinearLayout shared = card(page); heading(shared, "Общая база", 20);
+        button(shared, "Добавить поступление", () -> startActivity(new Intent(this, IncomeActivity.class)));
+        label(shared, IncomeReminders.summary(this), 13);
         if (SyncConfig.connected(this)) {
             label(shared, "Ожидают отправки: " + store.pendingSync() + " · Конфликтов: " + store.syncConflicts(), 13);
             String lastSync = SyncConfig.prefs(this).getString("lastSync", "");
@@ -383,7 +392,7 @@ public final class MainActivity extends Activity {
     }
     private TextView label(LinearLayout parent, String text, int size) { TextView view = new TextView(this); view.setText(text); UIStyles.text(view, size); view.setPadding(0, dp(5), 0, dp(7)); parent.addView(view); return view; }
     private void heading(LinearLayout parent, String text, int size) { label(parent, text, size).setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL)); }
-    private void button(LinearLayout parent, String text, Runnable action) { Button button = new Button(this); button.setText(text); UIStyles.button(button, text.equals("Мои дашборды")); LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2); params.setMargins(0, dp(5), 0, dp(5)); parent.addView(button, params); button.setOnClickListener(v -> action.run()); }
+    private void button(LinearLayout parent, String text, Runnable action) { Button button = new Button(this); button.setText(text); UIStyles.button(button, text.equals("Мои дашборды") || text.equals("Добавить поступление")); LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2); params.setMargins(0, dp(5), 0, dp(5)); parent.addView(button, params); button.setOnClickListener(v -> action.run()); }
     private EditText input(LinearLayout parent, String title, String value, int type) { label(parent, title, 12); EditText input = new EditText(this); input.setInputType(type); input.setText(value); UIStyles.input(input); parent.addView(input, new LinearLayout.LayoutParams(-1, -2)); return input; }
     private void toast(String message) { Toast.makeText(this, message == null ? "Не удалось выполнить действие." : message, Toast.LENGTH_LONG).show(); }
 }

@@ -11,6 +11,35 @@ const plan = changes => ({ currency: 'UZS', revenueMinor: 100000000, variableBps
 const fields = { role: 'role', source: 'source' };
 const sample = (role, changes = {}) => ({ id: randomUUID(), fingerprint: randomUUID(), source_type: 'sms', source_name: 'TEST', source_ref: 'test', received_at: '2026-10-01T05:00:00Z', event_millis: 1790830800000, raw_title: 'Original', raw_text: 'Original raw source', raw_fragment: 'Original fragment', amount_minor: 10000, currency: 'UZS', state: 'recorded', kind: 'expense', date: '2026-10-01', time: '10:00', merchant: 'Test', custom: role ? { role: economyRoles[role], source: 'Проект A' } : {}, ...changes });
 
+test('Поступление с телефона сразу входит в заработок; повтор синхронизации не удваивает и не переписывает роль', () => {
+  const store = createStore(':memory:');
+  try {
+    const economy = createEconomy(store), income = sample(null, { source_type: 'manual', source_ref: 'manual-earned-v1', kind: 'income', merchant: 'Проект A', category: 'Заработок' });
+    const packet = { cursor: 0, changes: [{ event: income, baseVersion: 0, clientRevision: 1 }] };
+    const first = store.sync(packet, 'phone-test', economy.acceptManualIncome);
+    assert.equal(first.acknowledgements[0].version, 1);
+    assert.equal(store.get(income.id).custom[economy.fields.role], economyRoles.earned);
+    assert.equal(store.get(income.id).custom[economy.fields.source], 'Проект A');
+    assert.equal(economy.report({ period: 'all' }).totals[0].earned, '10000');
+    store.sync(packet, 'phone-test', economy.acceptManualIncome);
+    assert.equal(store.all().length, 1); assert.equal(economy.backup().classifications.length, 1);
+    store.edit(income.id, { expectedVersion: 1, custom: { [economy.fields.role]: economyRoles.other } }, 'web', economy.audit);
+    store.sync(packet, 'phone-test', economy.acceptManualIncome);
+    assert.equal(store.get(income.id).custom[economy.fields.role], economyRoles.other);
+    assert.equal(economy.backup().classifications.length, 2);
+    assert.equal(store.get(income.id).raw_text, income.raw_text);
+    for (const overrides of [{ source_type: 'sms', source_ref: 'manual-earned-v1' }, { source_type: 'manual', source_ref: 'manual' }, { source_type: 'manual', source_ref: 'manual-earned-v1', kind: 'transfer' }, { source_type: 'manual', source_ref: 'manual-earned-v1', state: 'review' }]) {
+      const row = sample(null, { kind: 'income', ...overrides });
+      store.sync({ cursor: 0, changes: [{ event: row, baseVersion: 0, clientRevision: 1 }] }, 'phone-test', economy.acceptManualIncome);
+      assert.deepEqual(store.get(row.id).custom, {});
+    }
+    const rejected = sample(null, { source_type: 'manual', source_ref: 'manual-earned-v1', kind: 'income' });
+    assert.throws(() => store.sync({ cursor: 0, changes: [{ event: rejected, baseVersion: 0, clientRevision: 1 }] }, 'phone-test', row => { economy.acceptManualIncome(row); throw new Error('Storage interrupted'); }), /Storage interrupted/);
+    assert.throws(() => store.get(rejected.id), /не найдена/);
+    assert.equal(economy.backup().classifications.length, 2);
+  } finally { store.close(); }
+});
+
 test('ТОС-модель отделяет рабочий результат, личные расходы, инвестиции и отрицательный остаток', () => {
   const result = calculatePlan(plan());
   assert.deepEqual(result, { complete: true, variableMinor: '10000000', throughputMinor: '90000000', operatingMinor: '70000000', personalMinor: '-10000000', availableMinor: '-15000000', goalGapMinor: '-25000000', requiredRevenueMinor: '127777778' });
@@ -93,6 +122,16 @@ test('API экономики и активов требует вход, отда
     assert.equal((await fetch(url + '/api/economy/plan', { method: 'POST', headers, body: JSON.stringify({ ...plan(), expectedVersion: 0 }) })).status, 409);
     assert.equal((await fetch(url + '/api/assets', { method: 'POST', headers, body: JSON.stringify({ name: 'Счёт', kind: 'bank', currency: 'UZS', amountMinor: 10000, asOf: '2026-10-01', expectedVersion: 0 }) })).status, 200);
     const backup = await (await fetch(url + '/api/backup', { headers })).json(); assert.equal(backup.economy.history.length, 1); assert.equal(backup.personalAssets.history.length, 1); assert.equal(backup.events.length, 0);
+    const pairing = await (await fetch(url + '/api/pairing', { method: 'POST', headers, body: '{}' })).json();
+    const device = await (await fetch(url + '/api/pair', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: pairing.code, label: 'Income test phone' }) })).json();
+    const income = sample(null, { source_type: 'manual', source_ref: 'manual-earned-v1', kind: 'income', merchant: 'Проект API', category: 'Заработок' });
+    const packet = { cursor: 0, changes: [{ event: income, baseVersion: 0, clientRevision: 1 }] };
+    const mobile = { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + device.token }, body: JSON.stringify(packet) };
+    assert.equal((await fetch(url + '/api/sync', mobile)).status, 200);
+    assert.equal((await fetch(url + '/api/sync', mobile)).status, 200);
+    const afterIncome = await (await fetch(url + '/api/backup', { headers })).json();
+    assert.equal(afterIncome.events.length, 1); assert.equal(afterIncome.economy.classifications.length, 1);
+    assert.equal(afterIncome.events[0].custom[afterIncome.fields.find(field => field.builtin === 'economy-role').id], economyRoles.earned);
     for (const asset of ['/economy-ui.mjs', '/economy-math.mjs', '/assets-ui.mjs']) assert.match((await fetch(url + asset)).headers.get('content-type'), /javascript/);
   } finally {
     await app.close(); const relative = path.relative(realpathSync(base), realpathSync(directory)); if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('Unexpected test path'); rmSync(directory, { recursive: true });

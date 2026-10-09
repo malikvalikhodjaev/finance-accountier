@@ -68,4 +68,28 @@ connection.execute('INSERT INTO sync_state VALUES (?,?)', ('sms_history','{"last
 connection.execute('INSERT INTO sync_state VALUES (?,?)', ('cursor','100'))
 connection.execute("DELETE FROM sync_state WHERE name != 'sms_history'")
 assert connection.execute('SELECT value FROM sync_state').fetchone()[0] == '{"lastId":200,"scanned":200}'
-print('Migrations 1 -> 4, 2 -> 4, 3 -> 4 and fresh schema verified: raw texts, exact amounts and revisions preserved; history checkpoint survives changing sync server.')
+income_schema = re.search(r'db\.execSQL\("(CREATE TABLE IF NOT EXISTS income_reminders [^"]+)"\)', current)[1]
+for database in [connection, second, fresh]:
+    database.execute(income_schema)
+    assert database.execute('SELECT COUNT(*) FROM income_reminders').fetchone()[0] == 0
+assert connection.execute('SELECT raw_text FROM events').fetchone()[0] == original['raw_text']
+connection.execute("INSERT INTO income_reminders(cycle,status,due_at) VALUES('2026-10-20','pending',1000)")
+connection.commit()
+# Record creation and reminder completion must roll back together if storage fails.
+try:
+    with connection:
+        connection.execute("UPDATE income_reminders SET status='answered',answer_minor=50000,event_id='new-income' WHERE cycle='2026-10-20'")
+        raise RuntimeError('Storage interruption')
+except RuntimeError:
+    pass
+assert connection.execute('SELECT status FROM income_reminders').fetchone()[0] == 'pending'
+with connection:
+    connection.execute("UPDATE income_reminders SET due_at=9999999 WHERE cycle='2026-10-20' AND status='pending'")
+connection.execute("DELETE FROM sync_state WHERE name != 'sms_history'")
+assert connection.execute('SELECT due_at FROM income_reminders').fetchone()[0] == 9999999
+with connection:
+    connection.execute("UPDATE income_reminders SET status='answered',answer_minor=0 WHERE cycle='2026-10-20'")
+    connection.execute("INSERT OR IGNORE INTO income_reminders(cycle,status,due_at) VALUES('2026-10-20','pending',1000)")
+assert connection.execute('SELECT status,answer_minor,event_id FROM income_reminders').fetchone()[:] == ('answered', 0, None)
+assert connection.execute('SELECT COUNT(*) FROM events').fetchone()[0] == 1
+print('Migrations 1/2/3/4 -> 5 and fresh schema verified: raw data preserved; income reminder answers and snoozes survive sync reset; interruption rolls back and zero creates no event.')

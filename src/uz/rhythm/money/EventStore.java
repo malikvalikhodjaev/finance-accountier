@@ -8,6 +8,7 @@ import android.database.sqlite.SQLiteOpenHelper;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import java.time.Instant;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -15,13 +16,14 @@ import java.util.UUID;
 
 public final class EventStore extends SQLiteOpenHelper {
     private final Context context;
-    public EventStore(Context context) { super(context, "money.db", null, 4); this.context = context.getApplicationContext(); }
+    public EventStore(Context context) { super(context, "money.db", null, 5); this.context = context.getApplicationContext(); }
     @Override public void onCreate(SQLiteDatabase db) {
         db.execSQL("CREATE TABLE events (id TEXT PRIMARY KEY, fingerprint TEXT UNIQUE NOT NULL, signature TEXT, source_type TEXT NOT NULL, source_name TEXT NOT NULL, source_ref TEXT NOT NULL, received_at TEXT NOT NULL, event_millis INTEGER NOT NULL, raw_title TEXT NOT NULL, raw_text TEXT NOT NULL, raw_fragment TEXT NOT NULL, state TEXT NOT NULL, amount_minor INTEGER, currency TEXT, kind TEXT, date TEXT, time TEXT, merchant TEXT, card_suffix TEXT, balance_minor INTEGER, category TEXT, description TEXT, review_reason TEXT, purpose TEXT NOT NULL DEFAULT '', bank_operation TEXT NOT NULL DEFAULT '')");
         db.execSQL("CREATE INDEX events_signature ON events(signature)");
         db.execSQL("CREATE TABLE revisions (event_id TEXT NOT NULL, changed_at TEXT NOT NULL, previous_json TEXT NOT NULL)");
         syncSchema(db);
         historyIndexes(db);
+        incomeSchema(db);
     }
     @Override public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
         if (oldVersion == 1 && newVersion >= 2) {
@@ -30,7 +32,11 @@ public final class EventStore extends SQLiteOpenHelper {
         }
         if (oldVersion <= 2 && newVersion >= 3) syncSchema(db);
         if (oldVersion <= 3 && newVersion >= 4) historyIndexes(db);
-        if (oldVersion < 1 || newVersion > 4) throw new IllegalStateException("Требуется отдельная миграция хранилища.");
+        if (oldVersion <= 4 && newVersion >= 5) incomeSchema(db);
+        if (oldVersion < 1 || newVersion > 5) throw new IllegalStateException("Требуется отдельная миграция хранилища.");
+    }
+    private void incomeSchema(SQLiteDatabase db) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS income_reminders (cycle TEXT PRIMARY KEY, status TEXT NOT NULL CHECK(status IN ('pending','answered')), due_at INTEGER NOT NULL, answer_minor INTEGER, event_id TEXT, answered_at TEXT)");
     }
     private void historyIndexes(SQLiteDatabase db) {
         db.execSQL("CREATE INDEX IF NOT EXISTS events_state_date ON events(state, date, kind)");
@@ -240,6 +246,45 @@ public final class EventStore extends SQLiteOpenHelper {
         getWritableDatabase().insertOrThrow("events", null, value);
         saveTransaction(id, amount, currency, kind, date, category, description);
         return id;
+    }
+    public String quickIncome(String token, String cycle, String amount, String currency, String date, String source) {
+        if (token == null || !token.matches("[a-f0-9-]{36}")) throw new IllegalArgumentException("Перечитай форму поступления.");
+        long minor = IncomeReminderRules.amount(amount, cycle != null);
+        String code = Formats.currency(currency), day = Formats.validateDate(date), name = source.trim();
+        if (name.length() > 120) throw new IllegalArgumentException("Источник: до 120 символов.");
+        if (cycle != null) IncomeReminderRules.validateCycle(cycle);
+        String id = UUID.nameUUIDFromBytes(("pta-income:" + (cycle == null ? token : cycle)).getBytes(StandardCharsets.UTF_8)).toString();
+        SQLiteDatabase db = getWritableDatabase(); db.beginTransaction();
+        try {
+            if (cycle != null) {
+                try (Cursor c = db.rawQuery("SELECT status,event_id FROM income_reminders WHERE cycle=?", new String[]{cycle})) {
+                    if (!c.moveToFirst()) throw new IllegalArgumentException("Напоминание ещё не наступило.");
+                    if ("answered".equals(c.getString(0))) throw new IllegalArgumentException("На это напоминание уже ответили.");
+                }
+            }
+            if (minor > 0 && !existsId(db, id)) {
+                long millis = System.currentTimeMillis();
+                String description = name.isEmpty() ? "Заработок вручную" : name;
+                ContentValues value = base("manual", "Заработок вручную", "manual-earned-v1", id, millis, "", description, description, 0);
+                value.put("id", id); value.put("amount_minor", minor); value.put("currency", code); value.put("kind", "income");
+                value.put("date", day); value.put("time", java.time.Instant.ofEpochMilli(millis).atZone(Formats.ZONE).format(java.time.format.DateTimeFormatter.ofPattern("HH:mm")));
+                value.put("merchant", name); value.put("category", "Заработок"); value.put("description", description);
+                value.put("state", "recorded"); value.put("review_reason", "");
+                db.insertOrThrow("events", null, value);
+            }
+            if (cycle != null) {
+                ContentValues answer = new ContentValues(); answer.put("status", "answered"); answer.put("answer_minor", minor);
+                if (minor > 0) answer.put("event_id", id); else answer.putNull("event_id");
+                answer.put("answered_at", Instant.now().toString());
+                if (db.update("income_reminders", answer, "cycle=? AND status='pending'", new String[]{cycle}) != 1) throw new IllegalStateException("Ответ уже изменился.");
+            }
+            db.setTransactionSuccessful();
+        } finally { db.endTransaction(); }
+        SyncJobs.queue(context);
+        return minor == 0 ? "" : id;
+    }
+    private boolean existsId(SQLiteDatabase db, String id) {
+        try (Cursor c = db.rawQuery("SELECT 1 FROM events WHERE id=?", new String[]{id})) { return c.moveToFirst(); }
     }
     public void ignore(String id) {
         ContentValues value = new ContentValues(); value.put("state", "ignored");

@@ -120,7 +120,7 @@ export function createFinanceServer({ directory = path.join(root, '.web'), allow
       }
       if (req.method === 'POST' && url.pathname === '/api/sync') {
         if (!identity.mobile) fail('Нужен подключённый телефон.', 403);
-        return json(res, 200, store.sync(await body(req), identity.deviceId));
+        return json(res, 200, store.sync(await body(req), identity.deviceId, economy.acceptManualIncome));
       }
       if (req.method === 'POST' && url.pathname === '/api/mobile/imports/preview') {
         if (!identity.mobile) fail('Нужен подключённый телефон.', 403);

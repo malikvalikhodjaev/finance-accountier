@@ -9,7 +9,18 @@ import java.util.LinkedHashSet;
 import java.util.Set;
 
 public final class BankNotifications extends NotificationListenerService {
+    private android.content.BroadcastReceiver unlock;
+    @Override public void onCreate() {
+        super.onCreate();
+        unlock = new android.content.BroadcastReceiver() {
+            @Override public void onReceive(android.content.Context context, android.content.Intent intent) { PromptOverlay.resume(context); }
+        };
+        android.content.IntentFilter filter = new android.content.IntentFilter(android.content.Intent.ACTION_USER_PRESENT);
+        if (android.os.Build.VERSION.SDK_INT >= 33) registerReceiver(unlock, filter, android.content.Context.RECEIVER_NOT_EXPORTED); else registerReceiver(unlock, filter);
+    }
+    @Override public void onDestroy() { if (unlock != null) unregisterReceiver(unlock); super.onDestroy(); }
     @Override public void onListenerConnected() {
+        IncomeReminders.initialize(this);
         CollectorConfig.prefs(this).edit().putString("connectedAt", Instant.now().toString()).apply();
         StatusBarNotification[] active = getActiveNotifications();
         if (active != null) for (StatusBarNotification event : active) onNotificationPosted(event);

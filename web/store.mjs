@@ -174,7 +174,7 @@ export function createStore(filename) {
     }
     return results;
   }); }
-  function sync(input, deviceId) { return transaction(() => {
+  function sync(input, deviceId, onInsert = null) { return transaction(() => {
     if (!Array.isArray(input.changes) || input.changes.length > 100 || !Number.isSafeInteger(input.cursor) || input.cursor < 0) fail('Некорректный пакет синхронизации.');
     const acknowledgements = [], conflicts = [];
     if (!Array.isArray(input.resolvedIds || []) || (input.resolvedIds || []).length > 100) fail('Некорректные подтверждения разбора.');
@@ -185,7 +185,11 @@ export function createStore(filename) {
       if (!Number.isSafeInteger(change.clientRevision) || change.clientRevision < 1 || !Number.isSafeInteger(change.baseVersion) || change.baseVersion < 0) fail('Некорректная версия операции.');
       const currentRow = db.prepare('SELECT * FROM events WHERE id=?').get(incoming.id);
       let result;
-      if (!currentRow) { if (change.baseVersion !== 0) fail('Не найдена прежняя версия операции.', 409); result = save(incoming, deviceId); }
+      if (!currentRow) {
+        if (change.baseVersion !== 0) fail('Не найдена прежняя версия операции.', 409);
+        result = save(incoming, deviceId);
+        if (onInsert) onInsert(result);
+      }
       else {
         const current = normaliseEvent(get(incoming.id));
         const old = db.prepare('SELECT data FROM history WHERE event_id=? AND version=?').get(incoming.id, change.baseVersion);

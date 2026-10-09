@@ -48,12 +48,10 @@ public final class PaymentPrompts {
         try {
             JSONObject row = store.find(id);
             if (!needsAnswer(row) || !PurposeRules.notifyNow(row.optString("source_type"), row.optString("state"), row.optString("kind"), operation(row), row.optString("purpose", ""), row.optString("date"), row.optLong("event_millis"), System.currentTimeMillis())) return;
-            if (!allowed(context)) {
-                CollectorConfig.prefs(context).edit().putString("promptError", "Операции сохраняются, но вопросы не показываются. Разреши уведомления «На что потратил?».").apply();
-                return;
-            }
-            post(context, row);
-            CollectorConfig.prefs(context).edit().remove("promptError").apply();
+            if (allowed(context)) post(context, row);
+            PromptOverlay.offerPayment(context, id);
+            if (PromptOverlay.allowed(context)) CollectorConfig.prefs(context).edit().remove("promptError").apply();
+            else CollectorConfig.prefs(context).edit().putString("promptError", "Для отдельного окна разреши показ поверх приложений в «Окна и поступления».").apply();
         } catch (RuntimeException error) {
             CollectorConfig.prefs(context).edit().putString("promptError", "Операция сохранена. Вопрос можно открыть в её карточке.").apply();
         }
@@ -93,5 +91,5 @@ public final class PaymentPrompts {
             .build();
         context.getSystemService(NotificationManager.class).notify("purpose:" + id, 1, question);
     }
-    public static void cancel(Context context, String id) { context.getSystemService(NotificationManager.class).cancel("purpose:" + id, 1); }
+    public static void cancel(Context context, String id) { context.getSystemService(NotificationManager.class).cancel("purpose:" + id, 1); PromptOverlay.refreshPayment(context, id); }
 }
