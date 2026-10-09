@@ -174,6 +174,11 @@ async function loadRows(append = false) {
 }
 async function editRow(id, preset = {}) {
   const detail = id ? await api('/api/events/' + id) : null, row = detail?.row || { date: today(), amount_minor: null, currency: 'UZS', kind: 'expense', state: 'recorded', category: '', purpose: '', merchant: '', description: '', custom: {}, ...preset };
+  const incomeEntry = !id && preset.kind === 'income';
+  const incomeChoices = ['Зарплата', 'Проекты и клиенты', 'Бизнес', 'Подработка'];
+  const incomeType = incomeEntry ? select([['', 'Выбери тип поступления'], ...incomeChoices.map(value => [value, value]), ['other', 'Другое']], incomeChoices.includes(row.merchant) ? row.merchant : row.merchant ? 'other' : '') : null;
+  const otherIncome = incomeEntry ? el('input', { 'aria-label': 'Другой источник поступления', maxlength: '120', value: incomeChoices.includes(row.merchant) ? '' : row.merchant || '' }) : null;
+  const otherField = incomeEntry ? field('Какой источник поступления?', otherIncome, true) : null;
   const form = el('div', { class: 'form-grid' }), controls = {};
   controls.amount = el('input', { value: amountInput(row.amount_minor), inputmode: 'decimal', required: row.state === 'recorded' });
   controls.currency = el('input', { value: row.currency || 'UZS', maxlength: '3', required: true });
@@ -181,20 +186,45 @@ async function editRow(id, preset = {}) {
   controls.kind = select(Object.entries(kinds), row.kind || 'unknown'); controls.state = select(Object.entries(statuses), row.state);
   controls.state.onchange = () => controls.amount.required = controls.state.value === 'recorded';
   for (const key of ['merchant', 'category', 'purpose', 'description']) controls[key] = el(key === 'description' ? 'textarea' : 'input', { value: row[key] || '', maxlength: key === 'purpose' ? '240' : key === 'category' ? '120' : '500' });
-  for (const [label, key] of [['Сумма', 'amount'], ['Валюта', 'currency'], ['Дата', 'date'], ['Тип', 'kind'], ['Учёт', 'state'], ['Магазин / отправитель', 'merchant'], ['Категория', 'category'], ['На что', 'purpose'], ['Описание', 'description']]) form.append(field(label, controls[key], key === 'description'));
+  for (const [label, key] of [['Сумма', 'amount'], ['Валюта', 'currency'], ['Дата', 'date'], ['Тип', 'kind'], ['Учёт', 'state'], ['Магазин / отправитель', 'merchant'], ['Категория', 'category'], ['На что', 'purpose'], ['Описание', 'description']]) {
+    if (incomeEntry && key === 'date') {
+      controls.date.setAttribute('aria-label', 'Дата поступления'); controls.date.max = today();
+      form.append(el('div', { class: 'field' }, el('span', { text: 'Дата поступления' }), el('div', { class: 'income-date-row' }, controls.date, button('Сегодня', () => { controls.date.value = today(); controls.date.dispatchEvent(new Event('change')); }, true))));
+    } else {
+      const item = field(label, controls[key], key === 'description');
+      if (incomeEntry && key === 'merchant') item.hidden = true;
+      form.append(item);
+    }
+  }
+  if (incomeEntry) {
+    incomeType.setAttribute('aria-label', 'Тип поступления');
+    const updateIncome = () => { const visible = controls.kind.value === 'income'; incomeType.closest('.field').hidden = !visible; otherField.hidden = !visible || incomeType.value !== 'other'; controls.merchant.closest('.field').hidden = visible; };
+    form.append(field('Тип поступления', incomeType, true), otherField);
+    incomeType.onchange = updateIncome; controls.kind.onchange = updateIncome; updateIncome();
+  }
   const customControls = {};
   for (const item of state.meta.fields.filter(field => field.active)) {
     const value = row.custom?.[item.id];
     const control = item.type === 'select' ? select([['', 'Не указано'], ...item.options.map(value => [value, value]), ...(value && !item.options.includes(value) ? [[value, value + ' (из прежнего списка)']] : [])], value || '') : el('input', { type: item.type === 'checkbox' ? 'checkbox' : item.type === 'date' ? 'date' : item.type === 'number' ? 'number' : 'text', value: item.type === 'checkbox' ? 'yes' : value ?? '', checked: item.type === 'checkbox' && !!value, step: item.type === 'number' ? 'any' : null });
-    customControls[item.id] = control; form.append(field(item.name, control));
+    customControls[item.id] = control;
+    if (!(incomeEntry && item.builtin === 'economy-source')) form.append(field(item.name, control));
   }
   const wrapper = el('div', {}, form);
   if (detail?.orders?.length) wrapper.append(el('details', {}, el('summary', { text: 'Детали из заказов: ' + detail.orders.length }), ...detail.orders.map(order => button(order.title + (order.needsReview ? ' · связь требует проверки' : ''), () => { dialog.close(); return showOrder(order.id); }, true))));
   if (row.raw_text) wrapper.append(el('details', {}, el('summary', { text: 'Исходное банковское сообщение' }), el('pre', { text: row.raw_text })));
   if (detail?.history.length) wrapper.append(el('details', {}, el('summary', { text: 'История изменений: ' + detail.history.length }), ...detail.history.map(item => { const previous = JSON.parse(item.data); return el('p', { class: 'subtle', text: new Date(item.at).toLocaleString('ru-RU') + ' · ' + (item.actor === 'web' ? 'Веб' : 'Телефон / синхронизация') + ' · ' + money(previous.amount_minor) + ' ' + (previous.currency || '') + ' · ' + (previous.category || '') + ' · ' + (previous.purpose || '') }); })));
-  modal(id ? 'Исправить операцию' : 'Добавить операцию', wrapper, async () => {
+  modal(id ? 'Исправить операцию' : incomeEntry ? 'Добавить поступление' : 'Добавить операцию', wrapper, async () => {
     const event = Object.fromEntries(['date', 'kind', 'state', 'merchant', 'category', 'purpose', 'description'].map(key => [key, controls[key].value.trim()]));
     event.amount_minor = controls.amount.value.trim() ? minor(controls.amount.value) : null; event.currency = controls.currency.value.trim().toUpperCase();
+    if (incomeEntry && event.kind === 'income') {
+      if (!incomeType.value) throw new Error('Выбери тип поступления.');
+      event.merchant = incomeType.value === 'other' ? otherIncome.value.trim() : incomeType.value;
+      if (!event.merchant) throw new Error('Укажи источник поступления для «Другое».');
+      if (event.date > today()) throw new Error('Дата поступления не может быть в будущем.');
+      event.time = null;
+      const sourceField = state.meta.fields.find(item => item.active && item.builtin === 'economy-source');
+      if (sourceField) customControls[sourceField.id].value = event.merchant;
+    }
     const custom = { ...(row.custom || {}) };
     for (const item of state.meta.fields.filter(field => field.active)) { const control = customControls[item.id]; custom[item.id] = item.type === 'checkbox' ? control.checked : item.type === 'number' ? control.value === '' ? null : Number(control.value) : control.value || null; }
     try { await api('/api/events' + (id ? '/' + id : ''), { method: id ? 'PATCH' : 'POST', body: { event, custom, ...(id ? { expectedVersion: row.version } : {}) } }); }

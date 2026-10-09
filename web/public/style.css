@@ -177,6 +177,10 @@ a { color: #0066d6; }
   button:active { transform: none; }
 }
 .brand { display: flex; align-items: center; gap: .75rem; flex: 0 0 auto; }
+.form-grid .field[hidden] { display: none; }
+.income-date-row { display: flex; align-items: center; gap: .5rem; }
+.income-date-row input { min-width: 0; flex: 1; }
+.income-date-row button { flex: 0 0 auto; }
 .brand-mark { flex: 0 0 40px; border-radius: 11px; }
 .brand .brand-name { min-width: 0; color: #1d1d1f; font-size: 1.15rem; font-weight: 650; letter-spacing: -.03em; }
 .brand .brand-subtitle { font-size: .875rem; font-weight: 450; color: #6e6e73; line-height: 1.35; }
