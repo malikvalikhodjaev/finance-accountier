@@ -124,13 +124,15 @@ test('API экономики и активов требует вход, отда
     const backup = await (await fetch(url + '/api/backup', { headers })).json(); assert.equal(backup.economy.history.length, 1); assert.equal(backup.personalAssets.history.length, 1); assert.equal(backup.events.length, 0);
     const pairing = await (await fetch(url + '/api/pairing', { method: 'POST', headers, body: '{}' })).json();
     const device = await (await fetch(url + '/api/pair', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: pairing.code, label: 'Income test phone' }) })).json();
-    const income = sample(null, { source_type: 'manual', source_ref: 'manual-earned-v1', kind: 'income', merchant: 'Проект API', category: 'Заработок' });
+    const income = sample(null, { source_type: 'manual', source_ref: 'manual-earned-v1', kind: 'income', merchant: 'Зарплата', category: 'Заработок', time: null });
     const packet = { cursor: 0, changes: [{ event: income, baseVersion: 0, clientRevision: 1 }] };
     const mobile = { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + device.token }, body: JSON.stringify(packet) };
     assert.equal((await fetch(url + '/api/sync', mobile)).status, 200);
     assert.equal((await fetch(url + '/api/sync', mobile)).status, 200);
     const afterIncome = await (await fetch(url + '/api/backup', { headers })).json();
     assert.equal(afterIncome.events.length, 1); assert.equal(afterIncome.economy.classifications.length, 1);
+    assert.equal(afterIncome.events[0].time, null); assert.equal(afterIncome.events[0].date, income.date);
+    assert.equal(afterIncome.events[0].merchant, 'Зарплата');
     assert.equal(afterIncome.events[0].custom[afterIncome.fields.find(field => field.builtin === 'economy-role').id], economyRoles.earned);
     for (const asset of ['/economy-ui.mjs', '/economy-math.mjs', '/assets-ui.mjs']) assert.match((await fetch(url + asset)).headers.get('content-type'), /javascript/);
   } finally {

@@ -11,6 +11,8 @@ import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
 
 final class UIStyles {
     static final int INK = Color.rgb(29, 29, 31);
@@ -62,5 +64,13 @@ final class UIStyles {
         view.setMinHeight(dp(context, 48));
         view.setPadding(dp(context, 12), dp(context, 10), dp(context, 12), dp(context, 10));
         view.setBackground(rounded(context, Color.WHITE, 10, true));
+    }
+    static void identity(LinearLayout parent) {
+        Context context = parent.getContext();
+        LinearLayout row = new LinearLayout(context); row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        ImageView mark = new ImageView(context); mark.setImageResource(context.getResources().getIdentifier("icon", "drawable", context.getPackageName()));
+        LinearLayout.LayoutParams icon = new LinearLayout.LayoutParams(dp(context, 36), dp(context, 36)); icon.rightMargin = dp(context, 12); row.addView(mark, icon);
+        TextView owner = new TextView(context); owner.setText("МВ · Малик Валиходжаев"); text(owner, 14); row.addView(owner, new LinearLayout.LayoutParams(0, -2, 1));
+        LinearLayout.LayoutParams layout = new LinearLayout.LayoutParams(-1, -2); layout.bottomMargin = dp(context, 12); parent.addView(row, layout);
     }
 }

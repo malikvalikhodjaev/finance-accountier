@@ -210,7 +210,7 @@ export function createFinanceServer({ directory = path.join(root, '.web'), allow
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const port = Number(process.env.FINANCE_PORT || 8788);
   const app = createFinanceServer({ port, directory: process.env.FINANCE_DATA_DIR || path.join(root, '.web'), advertisedHost: process.env.FINANCE_HOST || null });
-  app.server.listen(port, '0.0.0.0', () => { writeFileSync(path.join(root, '.web', 'server.json'), JSON.stringify({ port, url: 'http://' + app.host + ':' + port, pid: process.pid })); console.log('Personal Throughput Accounting: http://127.0.0.1:' + port + '\nНа телефоне: http://' + app.host + ':' + port); });
+  app.server.listen(port, '0.0.0.0', () => { writeFileSync(path.join(root, '.web', 'server.json'), JSON.stringify({ port, url: 'http://' + app.host + ':' + port, pid: process.pid })); console.log('My Personal Throughput Accounting: http://127.0.0.1:' + port + '\nНа телефоне: http://' + app.host + ':' + port); });
   app.server.on('error', error => { console.error(error.code === 'EADDRINUSE' ? 'Порт занят; проверь уже запущенный финансовый сервер.' : error.message); app.store.close(); process.exitCode = 1; });
   for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => app.close().then(() => process.exit(0)));
 }

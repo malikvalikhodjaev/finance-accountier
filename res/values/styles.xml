@@ -9,4 +9,12 @@
         <item name="android:navigationBarColor">#F5F5F7</item>
         <item name="android:windowLightStatusBar">true</item>
     </style>
+    <style name="IncomeCalendarTheme" parent="android:style/Theme.Material.Light.Dialog.Alert">
+        <item name="android:colorAccent">#007AFF</item>
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="android:datePickerStyle">@style/IncomeCalendarWidget</item>
+    </style>
+    <style name="IncomeCalendarWidget" parent="android:style/Widget.Material.DatePicker">
+        <item name="android:datePickerMode">calendar</item>
+    </style>
 </resources>

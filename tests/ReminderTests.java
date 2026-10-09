@@ -35,6 +35,11 @@ public final class ReminderTests {
         rejects(() -> IncomeReminderRules.amount("1.001", false), "More than two decimal places rejected");
         rejects(() -> IncomeReminderRules.amount("1000000000001", false), "Ledger amount limit preserved");
         check(Instant.ofEpochMilli(time("2026-10-20", 9, 0)).toString().equals("2026-10-20T04:00:00Z"), "Schedule fixed to Tashkent regardless of device timezone");
-        System.out.println("Passed " + checks + " income reminder checks.");
+        check(IncomeTypes.source(1, "").equals("Зарплата"), "A listed source is saved by its displayed type");
+        check(IncomeTypes.source(IncomeTypes.OTHER, "  Консультация  ").equals("Консультация"), "Other source keeps the owner's text");
+        rejects(() -> IncomeTypes.source(0, ""), "Missing type is not silently classified as salary");
+        rejects(() -> IncomeTypes.source(IncomeTypes.OTHER, "   "), "Other type requires meaningful text");
+        check(IncomeTypes.selection("Зарплата") == 1 && IncomeTypes.selection("Консультация") == IncomeTypes.OTHER, "Legacy drafts restore listed and custom sources");
+        System.out.println("Passed " + checks + " income reminder and source checks.");
     }
 }

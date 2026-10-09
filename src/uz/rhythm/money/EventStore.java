@@ -267,7 +267,7 @@ public final class EventStore extends SQLiteOpenHelper {
                 String description = name.isEmpty() ? "Заработок вручную" : name;
                 ContentValues value = base("manual", "Заработок вручную", "manual-earned-v1", id, millis, "", description, description, 0);
                 value.put("id", id); value.put("amount_minor", minor); value.put("currency", code); value.put("kind", "income");
-                value.put("date", day); value.put("time", java.time.Instant.ofEpochMilli(millis).atZone(Formats.ZONE).format(java.time.format.DateTimeFormatter.ofPattern("HH:mm")));
+                value.put("date", day); value.putNull("time");
                 value.put("merchant", name); value.put("category", "Заработок"); value.put("description", description);
                 value.put("state", "recorded"); value.put("review_reason", "");
                 db.insertOrThrow("events", null, value);

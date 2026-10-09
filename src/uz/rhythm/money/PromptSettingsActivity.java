@@ -75,7 +75,7 @@ public final class PromptSettingsActivity extends Activity {
             if (notification.getTag() != null && notification.getTag().startsWith("purpose:")) manager.cancel(notification.getTag(), notification.getId());
     }
     private void settings(Intent intent) {
-        try { startActivity(intent); } catch (RuntimeException error) { Toast.makeText(this, "Открой разрешения Personal Throughput Accounting в настройках телефона", Toast.LENGTH_LONG).show(); }
+        try { startActivity(intent); } catch (RuntimeException error) { Toast.makeText(this, "Открой разрешения My Personal Throughput Accounting в настройках телефона", Toast.LENGTH_LONG).show(); }
     }
     private void label(String text, int size) { TextView view = new TextView(this); view.setText(text); UIStyles.text(view, size); view.setPadding(0, UIStyles.dp(this, 14), 0, UIStyles.dp(this, 8)); page.addView(view); }
     private void button(String text, boolean primary, Runnable action) {

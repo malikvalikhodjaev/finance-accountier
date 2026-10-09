@@ -87,7 +87,8 @@ public final class MainActivity extends Activity {
             return insets;
         });
         setContentView(scroll);
-        heading(page, "Personal Throughput Accounting", 28);
+        UIStyles.identity(page);
+        heading(page, "My Personal Throughput Accounting", 28);
         label(page, "После оплаты — короткий вопрос «На что?». Сумма и магазин уже записаны.", 15);
         LinearLayout setup = card(page);
         boolean access = notificationAccess(), enabled = CollectorConfig.enabled(this);
@@ -211,7 +212,7 @@ public final class MainActivity extends Activity {
     private void openWeb(String tab) { Intent intent = new Intent(this, WebActivity.class); intent.putExtra("tab", tab); startActivity(intent); }
     private void configureSync() {
         LinearLayout fields = vertical(); fields.setPadding(dp(20), dp(10), dp(20), dp(10));
-        label(fields, "Открой Personal Throughput Accounting на ПК → Подключение → Получить код. Телефон и компьютер должны быть в одной Wi-Fi-сети.", 14);
+        label(fields, "Открой My Personal Throughput Accounting на ПК → Подключение → Получить код. Телефон и компьютер должны быть в одной Wi-Fi-сети.", 14);
         EditText url = input(fields, "Адрес с компьютера", SyncConfig.url(this), InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
         EditText code = input(fields, "Шестизначный код", "", InputType.TYPE_CLASS_NUMBER);
         AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Подключить общую таблицу").setView(fields).setPositiveButton("Подключить", null).setNegativeButton("Отмена", null).create();

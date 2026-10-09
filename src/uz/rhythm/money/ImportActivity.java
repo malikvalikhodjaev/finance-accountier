@@ -38,7 +38,7 @@ public final class ImportActivity extends Activity {
         ScrollView scroll = new ScrollView(this); page = new LinearLayout(this); page.setOrientation(LinearLayout.VERTICAL); page.setPadding(28, 28, 28, 28); page.setBackgroundColor(UIStyles.BACKGROUND); scroll.addView(page);
         scroll.setOnApplyWindowInsetsListener((view, insets) -> { page.setPadding(28, 28 + insets.getSystemWindowInsetTop(), 28, 28 + insets.getSystemWindowInsetBottom()); return insets; }); setContentView(scroll);
         text("Выписки", 26);
-        text("Отправь PDF банка или Excel Payme через «Поделиться → Personal Throughput Accounting». Поддерживаются выписка Uzum на английском, история Ipak Yuli и XLSX Payme. Выбери источник, затем проверь операции.", 16);
+        text("Отправь PDF банка или Excel Payme через «Поделиться → My Personal Throughput Accounting». Поддерживаются выписка Uzum на английском, история Ipak Yuli и XLSX Payme. Выбери источник, затем проверь операции.", 16);
         if (!status.isEmpty()) text(status, 16);
         if (busy) text("Подожди завершения. Операции ещё не добавляются в таблицу.", 14);
         boolean found = false;

@@ -97,7 +97,7 @@ public final class StatementInbox {
         saved.put("bank", bank); saved.put("cardSuffix", card); metadata(context, id, saved);
     }
     public static synchronized JSONObject prepare(Context context, String id) throws Exception {
-        if (!SyncConfig.connected(context)) throw new IllegalStateException("Файл сохранён. Подключи общую базу в Personal Throughput Accounting, затем открой «Полученные выписки».");
+        if (!SyncConfig.connected(context)) throw new IllegalStateException("Файл сохранён. Подключи общую базу в My Personal Throughput Accounting, затем открой «Полученные выписки».");
         JSONObject saved = metadata(context, id); String server = SyncConfig.prefs(context).getString("serverId", "");
         String prepared = saved.optString("importId"); JSONObject preview;
         if (prepared.matches("[a-f0-9-]{36}") && server.equals(saved.optString("serverId"))) preview = SyncTransport.statement(context, "/api/mobile/imports/" + prepared, null);
