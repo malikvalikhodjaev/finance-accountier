@@ -71,6 +71,20 @@ test('Поступления видны до определения назнач
   assert.equal(JSON.stringify(rows), snapshot);
 });
 
+test('Push Uzum: отправленный перевод виден как исходящий, расход определяется только назначением', () => {
+  const transfer = sample({ source_type: 'push', source_ref: 'uz.kapitalbank.android', raw_title: 'Перевод отправлен', bank_operation: 'Перевод отправлен', kind: 'unknown', state: 'review', amount_minor: 1500000 });
+  const ownMoney = { ...transfer, id: randomUUID(), kind: 'transfer', state: 'recorded', purpose: 'Свои деньги' };
+  const snapshot = JSON.stringify([transfer, ownMoney]);
+  assert.equal(flowOf(transfer), 'outgoing');
+  assert.deepEqual(selectRows([transfer, ownMoney], { period: 'all', flow: 'outgoing' }).map(row => row.id), [transfer.id, ownMoney.id]);
+  assert.equal(aggregate([transfer, ownMoney], { metric: 'expense', group: '' }, { period: 'all' }).length, 0);
+  assert.equal(aggregate([transfer, ownMoney], { metric: 'incoming', group: '' }, { period: 'all' }).length, 0);
+  const meal = { ...transfer, kind: 'expense', state: 'recorded', purpose: 'Обед' };
+  assert.equal(aggregate([meal, ownMoney], { metric: 'expense', group: '' }, { period: 'all' })[0].amountMinor, '1500000');
+  for (const operation of ['Перевод', 'Перевод не отправлен', 'Перевод отправленность', 'Перевод получен']) assert.equal(flowOf({ ...transfer, bank_operation: operation }), 'unknown');
+  assert.equal(JSON.stringify([transfer, ownMoney]), snapshot);
+});
+
 test('Повторный разбор SMS сохраняет источник и старую версию, не подтверждает доход и принимает правку со старой версии телефона', () => {
   const store = createStore(':memory:');
   try {

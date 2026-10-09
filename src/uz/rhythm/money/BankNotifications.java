@@ -51,7 +51,7 @@ public final class BankNotifications extends NotificationListenerService {
             if (event.getPackageName().equals(UzumPushParser.PACKAGE) && !Formats.authenticationText(title + "\n" + body)) {
                 boolean recognised = UzumPushParser.parse(event.getPackageName(), title, body, event.getPostTime()) != null || !BankParser.parse(body).isEmpty();
                 CollectorConfig.prefs(this).edit().putLong("uzumLastPushAt", event.getPostTime())
-                    .putString("uzumLastPushStatus", recognised ? added > 0 ? "Перевод распознан; назначение можно уточнить" : "Это уведомление уже сохранено" : "Уведомление получено; формат требует проверки").apply();
+                    .putString("uzumLastPushStatus", recognised ? added > 0 ? "Операция распознана; назначение можно уточнить" : "Это уведомление уже сохранено" : "Уведомление получено; формат требует проверки").apply();
             }
         } catch (RuntimeException error) {
             CollectorConfig.prefs(this).edit().putString("lastError", "Не удалось сохранить уведомление. Проверь свободное место.").apply();
