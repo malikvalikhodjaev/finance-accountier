@@ -9,6 +9,9 @@ import java.util.LinkedHashSet;
 import java.util.Set;
 
 public final class BankNotifications extends NotificationListenerService {
+    public static void refresh(android.content.Context context) {
+        requestRebind(new android.content.ComponentName(context, BankNotifications.class));
+    }
     private android.content.BroadcastReceiver unlock;
     @Override public void onCreate() {
         super.onCreate();
@@ -44,7 +47,12 @@ public final class BankNotifications extends NotificationListenerService {
         try { name = getPackageManager().getApplicationLabel(getPackageManager().getApplicationInfo(name, 0)).toString(); }
         catch (Exception ignored) { /* The package name remains an exact source identifier. */ }
         try (EventStore store = new EventStore(this)) {
-            store.capture("push", name, event.getPackageName(), event.getKey(), event.getPostTime(), title, body);
+            int added = store.capture("push", name, event.getPackageName(), event.getKey(), event.getPostTime(), title, body);
+            if (event.getPackageName().equals(UzumPushParser.PACKAGE) && !Formats.authenticationText(title + "\n" + body)) {
+                boolean recognised = UzumPushParser.parse(event.getPackageName(), title, body, event.getPostTime()) != null || !BankParser.parse(body).isEmpty();
+                CollectorConfig.prefs(this).edit().putLong("uzumLastPushAt", event.getPostTime())
+                    .putString("uzumLastPushStatus", recognised ? added > 0 ? "Перевод распознан; назначение можно уточнить" : "Это уведомление уже сохранено" : "Уведомление получено; формат требует проверки").apply();
+            }
         } catch (RuntimeException error) {
             CollectorConfig.prefs(this).edit().putString("lastError", "Не удалось сохранить уведомление. Проверь свободное место.").apply();
         }

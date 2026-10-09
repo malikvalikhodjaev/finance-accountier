@@ -40,7 +40,7 @@ public final class PurposeRules {
         String op = operation == null ? "" : operation.trim().toLowerCase(Locale.ROOT).replace('\u2018', '\'').replace('\u2019', '\'');
         boolean outgoing = op.equals("platezh") || op.equals("platej") || op.startsWith("spisanie ")
             || op.equals("humo oplata") || op.equals("debit online") || op.equals("kartadan chiqim")
-            || op.equals("online to'lov") || op.equals("to'lov") || op.equals("pokupka") || op.equals("e-com oplata");
+            || op.equals("online to'lov") || op.equals("to'lov") || op.equals("pokupka") || op.equals("e-com oplata") || op.equals("перевод отправлен");
         return "review".equals(state) && "unknown".equals(kind) && outgoing;
     }
     public static String resolvedKind(String currentKind, String answer) {

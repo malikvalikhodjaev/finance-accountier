@@ -32,8 +32,22 @@ public final class PromptSettingsActivity extends Activity {
         button(asks ? "Выключить вопросы после оплаты" : "Включить вопросы после оплаты", false, () -> {
             CollectorConfig.prefs(this).edit().putBoolean("askPurpose", !asks).commit();
             if (asks) { PromptOverlay.paused(this); clearPaymentNotifications(); }
+            else BankNotifications.refresh(this);
             render();
         });
+        label("Уведомления Uzum Bank", 20);
+        boolean uzum = CollectorConfig.apps(this).contains(UzumPushParser.PACKAGE);
+        label(uzum ? "Uzum Bank выбран. После подтверждённого перевода вопрос работает без SMS." : "Uzum Bank пока не выбран как источник уведомлений.", 14);
+        if (!uzum) button("Добавить Uzum Bank", true, () -> {
+            try {
+                getPackageManager().getApplicationInfo(UzumPushParser.PACKAGE, 0);
+                java.util.Set<String> apps = CollectorConfig.apps(this); apps.add(UzumPushParser.PACKAGE);
+                CollectorConfig.prefs(this).edit().putStringSet("apps", apps).commit(); BankNotifications.refresh(this); render();
+            } catch (android.content.pm.PackageManager.NameNotFoundException error) { Toast.makeText(this, "Приложение Uzum Bank не найдено. Выбери его через «Настроить сбор».", Toast.LENGTH_LONG).show(); }
+        });
+        long lastPush = CollectorConfig.prefs(this).getLong("uzumLastPushAt", 0);
+        if (lastPush > 0) label("Последнее уведомление: " + IncomeReminders.displayTime(lastPush) + " · " + CollectorConfig.prefs(this).getString("uzumLastPushStatus", ""), 14);
+        button("Проверить недавние уведомления", false, () -> { BankNotifications.refresh(this); Toast.makeText(this, "Проверю уведомления, которые ещё находятся в шторке", Toast.LENGTH_SHORT).show(); });
         label("Поступления", 20);
         button("Добавить поступление", true, () -> startActivity(new Intent(this, IncomeActivity.class)));
         label(IncomeReminders.summary(this), 16);

@@ -94,6 +94,7 @@ public final class MainActivity extends Activity {
         boolean access = notificationAccess(), enabled = CollectorConfig.enabled(this);
         heading(setup, enabled ? "Сбор включён" : "Сбор на паузе", 18);
         label(setup, "Приложений выбрано: " + CollectorConfig.apps(this).size() + " · Доступ к уведомлениям: " + (access ? "есть" : "нужен"), 13);
+        label(setup, CollectorConfig.apps(this).contains(UzumPushParser.PACKAGE) ? "Uzum Bank: уведомления включены" : "Uzum Bank не выбран — добавь его в «Окна и поступления»", 13);
         boolean smsReady = !CollectorConfig.prefs(this).getString("senders", "").trim().isEmpty() && checkSelfPermission(Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED;
         label(setup, "Приём SMS: " + (smsReady ? "настроен" : "не настроен"), 13);
         boolean ready = smsReady || (access && !CollectorConfig.apps(this).isEmpty());
@@ -117,7 +118,7 @@ public final class MainActivity extends Activity {
                     for (android.service.notification.StatusBarNotification notification : manager.getActiveNotifications())
                         if (notification.getTag() != null && notification.getTag().startsWith("purpose:")) manager.cancel(notification.getTag(), notification.getId());
                 }
-                else if (!PaymentPrompts.allowed(this)) allowPromptNotifications();
+                else { if (!PaymentPrompts.allowed(this)) allowPromptNotifications(); BankNotifications.refresh(this); }
                 render();
             });
             button(setup, enabled ? "Поставить сбор на паузу" : "Возобновить сбор", () -> { CollectorConfig.prefs(this).edit().putBoolean("enabled", !enabled).apply(); render(); });
@@ -295,7 +296,7 @@ public final class MainActivity extends Activity {
             .setMultiChoiceItems(labels, checked, (dialog, which, value) -> checked[which] = value)
             .setPositiveButton("Сохранить", (dialog, which) -> {
                 Set<String> result = new HashSet<>(); for (int i = 0; i < items.size(); i++) if (checked[i]) result.add(items.get(i).getKey());
-                CollectorConfig.prefs(this).edit().putStringSet("apps", result).apply(); render();
+                CollectorConfig.prefs(this).edit().putStringSet("apps", result).apply(); BankNotifications.refresh(this); render();
             }).setNegativeButton("Отмена", null).show();
     }
     private boolean bankCandidate(String label) { return label.toLowerCase(Locale.ROOT).matches(".*(uzum|payme|ipak|ипак).*"); }

@@ -71,6 +71,10 @@ public final class EventStore extends SQLiteOpenHelper {
             for (int index = 0; index < fragments.size(); index++) {
                 String fragment = fragments.get(index);
                 List<BankParser.Transaction> parsed = BankParser.parse(fragment);
+                if (parsed.isEmpty() && type.equals("push")) {
+                    BankParser.Transaction push = UzumPushParser.parse(ref, title, fragment, millis);
+                    if (push != null) parsed.add(push);
+                }
                 ContentValues value = base(type, name, ref, identity, millis, title, raw, fragment, index);
                 if (containsFingerprint(db, value.getAsString("fingerprint"))) continue;
                 if (parsed.isEmpty()) {
