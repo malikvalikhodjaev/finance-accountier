@@ -104,6 +104,7 @@ export function createFinanceServer({ directory = path.join(root, '.web'), allow
         if (!row || !store.db.prepare('SELECT 1 FROM devices WHERE id=? AND revoked=0').get(row.device_id)) fail('Ссылка подключения истекла.', 401);
         const params = new URLSearchParams();
         params.set('tab', ['table', 'dashboard', 'orders'].includes(url.searchParams.get('tab')) ? url.searchParams.get('tab') : 'table');
+        if (url.searchParams.get('embedded') === '1') params.set('embedded', '1');
         const importId = url.searchParams.get('import');
         if (/^[a-f0-9-]{36}$/.test(importId || '')) params.set('import', importId);
         store.db.prepare('DELETE FROM tickets WHERE hash=?').run(row.hash); session(res, row.device_id); res.writeHead(303, { Location: '/' + (params.size ? '?' + params : '') }); return res.end();

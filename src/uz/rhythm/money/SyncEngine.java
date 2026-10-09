@@ -43,7 +43,7 @@ public final class SyncEngine {
     }
     public static String browser(Context context, String tab) throws Exception {
         JSONObject result = SyncTransport.request(context, SyncConfig.url(context) + "/api/mobile/browser-session", new JSONObject(), true);
-        String target = SyncConfig.url(context) + result.getString("path") + (tab.equals("dashboard") ? "&tab=dashboard" : "&tab=table");
+        String target = SyncConfig.url(context) + result.getString("path") + "&tab=" + (tab.equals("dashboard") || tab.equals("orders") ? tab : "table");
         if (!SyncConfig.sameOrigin(SyncConfig.url(context), target)) throw new IllegalStateException("Сервер вернул другой адрес."); return target;
     }
 }

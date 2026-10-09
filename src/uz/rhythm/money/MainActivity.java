@@ -43,12 +43,16 @@ public final class MainActivity extends Activity {
     private EventStore store;
     private int period = 30;
     private boolean showIgnored = false;
-    private Boolean expandSetup;
-    private int topInset, bottomInset;
+    private Boolean expandSetup = true;
+    private String section = "dashboard", webServer = "";
+    private LinearLayout navigation, body, webContainer;
+    private FinanceWebPanel webPanel;
+    private boolean offline;
     private boolean exporting;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        if (state != null) { section = state.getString("section", "dashboard"); period = state.getInt("period", 30); }
         store = new EventStore(this);
         PaymentPrompts.ensureChannel(this);
         SyncJobs.periodic(this);
@@ -58,8 +62,8 @@ public final class MainActivity extends Activity {
         render();
         openPurposeIntent(getIntent());
     }
-    @Override public void onResume() { super.onResume(); if (store != null) render(); PromptOverlay.resume(this); }
-    @Override public void onDestroy() { if (store != null) store.close(); super.onDestroy(); }
+    @Override public void onResume() { super.onResume(); if (store != null && (webPanel == null || !(section.equals("dashboard") || section.equals("table")))) render(); PromptOverlay.resume(this); }
+    @Override public void onDestroy() { resetWeb(); if (store != null) store.close(); super.onDestroy(); }
     @Override public void onNewIntent(Intent intent) { super.onNewIntent(intent); setIntent(intent); acceptShared(intent); render(); openPurposeIntent(intent); }
     private void openPurposeIntent(Intent intent) {
         String id = intent.getStringExtra(PaymentPrompts.EVENT_EXTRA);
@@ -77,19 +81,153 @@ public final class MainActivity extends Activity {
         }
     }
     private void render() {
-        ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(true); scroll.setBackgroundColor(UIStyles.BACKGROUND);
-        page = vertical(); page.setPadding(dp(20), dp(20) + topInset, dp(20), dp(24) + bottomInset);
-        scroll.addView(page);
-        scroll.setOnApplyWindowInsetsListener((view, insets) -> {
-            topInset = insets.getSystemWindowInsetTop(); bottomInset = insets.getSystemWindowInsetBottom();
-            page.setPadding(dp(20), dp(20) + topInset, dp(20), dp(24) + bottomInset);
-            return insets;
+        if (webPanel != null && (!SyncConfig.connected(this) || !webServer.equals(SyncConfig.url(this)))) resetWeb();
+        LinearLayout shell = vertical(); shell.setBackgroundColor(UIStyles.BACKGROUND);
+        shell.setOnApplyWindowInsetsListener((view, insets) -> { shell.setPadding(0, insets.getSystemWindowInsetTop(), 0, insets.getSystemWindowInsetBottom()); return insets; });
+        setContentView(shell); shell.requestApplyInsets();
+        LinearLayout identity = new LinearLayout(this); identity.setGravity(android.view.Gravity.CENTER_VERTICAL); identity.setPadding(dp(20), dp(10), dp(20), dp(10));
+        android.widget.ImageView logo = new android.widget.ImageView(this); logo.setImageResource(getResources().getIdentifier("icon", "drawable", getPackageName()));
+        LinearLayout.LayoutParams mark = new LinearLayout.LayoutParams(dp(36), dp(36)); mark.rightMargin = dp(10); identity.addView(logo, mark);
+        LinearLayout name = vertical(); heading(name, "My Personal", 16); TextView subtitle = label(name, "Throughput Accounting", 12); subtitle.setPadding(0, 0, 0, 0);
+        identity.addView(name, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView owner = new TextView(this); owner.setText("МВ"); owner.setGravity(android.view.Gravity.CENTER); UIStyles.text(owner, 14);
+        owner.setBackground(UIStyles.rounded(this, Color.rgb(232,232,236), 22, false)); owner.setContentDescription("Малик Валиходжаев · Настройки"); owner.setTooltipText("Малик Валиходжаев"); owner.setOnClickListener(v -> selectSection("settings"));
+        identity.addView(owner, new LinearLayout.LayoutParams(dp(44), dp(44))); shell.addView(identity);
+        body = vertical(); shell.addView(body, new LinearLayout.LayoutParams(-1, 0, 1));
+        navigation = new LinearLayout(this); navigation.setGravity(android.view.Gravity.CENTER); navigation.setPadding(dp(8), dp(8), dp(8), dp(8));
+        navigation.setBackgroundColor(Color.WHITE); navigation.setElevation(dp(8)); shell.addView(navigation); renderNavigation();
+        if ((section.equals("dashboard") || section.equals("table")) && SyncConfig.connected(this) && !offline) {
+            if (webContainer == null) {
+                webContainer = vertical(); webContainer.setGravity(android.view.Gravity.CENTER);
+                label(webContainer, "Открываю " + (section.equals("dashboard") ? "дашборды…" : "таблицы…"), 16);
+                android.widget.ProgressBar loading = new android.widget.ProgressBar(this); webContainer.addView(loading, new LinearLayout.LayoutParams(dp(30), dp(30)));
+            }
+            if (webContainer.getParent() instanceof android.view.ViewGroup) ((android.view.ViewGroup)webContainer.getParent()).removeView(webContainer);
+            body.addView(webContainer, new LinearLayout.LayoutParams(-1, -1));
+            if (webPanel == null) {
+                webServer = SyncConfig.url(this);
+                webPanel = new FinanceWebPanel(this, webContainer, section, new FinanceWebPanel.Host() {
+                    public void unavailable() { offline = true; resetWeb(); if (section.equals("dashboard") || section.equals("table")) render(); }
+                    public void selected(String tab) { if (section.equals("dashboard") || section.equals("table")) { section = tab; renderNavigation(); } }
+                });
+            }
+            return;
+        }
+        ScrollView scroll = new ScrollView(this); scroll.setFillViewport(true); page = vertical(); page.setPadding(dp(20), dp(8), dp(20), dp(24));
+        scroll.addView(page); body.addView(scroll, new LinearLayout.LayoutParams(-1, -1));
+        if (section.equals("settings")) renderSettings(); else if (section.equals("data")) renderData();
+        else if (section.equals("table")) renderLocalTable(); else renderLocalDashboard();
+    }
+    private void selectSection(String selected) {
+        if (selected.equals(section)) return;
+        boolean fromWeb = webPanel != null && (section.equals("dashboard") || section.equals("table"));
+        section = selected;
+        if (selected.equals("dashboard") || selected.equals("table")) {
+            offline = false;
+            if (fromWeb) { webPanel.select(selected); renderNavigation(); return; }
+        }
+        render(); if (webPanel != null && (section.equals("dashboard") || section.equals("table"))) webPanel.select(section);
+    }
+    private void renderNavigation() {
+        navigation.removeAllViews();
+        String[] tabs = {"dashboard", "table", "data", "settings"}, titles = {"Дашборды", "Таблицы", "Данные", "Настройки"};
+        for (int i = 0; i < tabs.length; i++) {
+            String tab = tabs[i]; boolean active = section.equals(tab);
+            LinearLayout item = vertical(); item.setGravity(android.view.Gravity.CENTER); item.setPadding(dp(2), dp(6), dp(2), dp(6));
+            if (active) { item.setBackground(UIStyles.rounded(this, UIStyles.BACKGROUND, 14, true)); item.setElevation(dp(2)); }
+            item.addView(new NavigationIcon(this, tab, active), new LinearLayout.LayoutParams(dp(23), dp(23)));
+            TextView text = new TextView(this); text.setText(titles[i]); UIStyles.text(text, 11); text.setTextColor(active ? UIStyles.INK : UIStyles.MUTED); text.setPadding(0, dp(5), 0, 0); item.addView(text);
+            item.setContentDescription(titles[i]); text.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            item.setSelected(active); item.setFocusable(true); item.setOnClickListener(v -> selectSection(tab));
+            LinearLayout.LayoutParams layout = new LinearLayout.LayoutParams(0, dp(64), 1); layout.setMargins(dp(2), 0, dp(2), 0); navigation.addView(item, layout);
+        }
+    }
+    private void resetWeb() { if (webPanel != null) webPanel.destroy(); webPanel = null; webContainer = null; }
+    @Override protected void onSaveInstanceState(Bundle state) { super.onSaveInstanceState(state); state.putString("section", section); state.putInt("period", period); }
+    @Override protected void onActivityResult(int request, int result, Intent data) {
+        super.onActivityResult(request, result, data); if (webPanel != null) webPanel.result(request, result, data);
+    }
+    @Override public void onBackPressed() {
+        if (webPanel != null && (section.equals("dashboard") || section.equals("table")) && webPanel.back()) return;
+        if (!section.equals("dashboard")) selectSection("dashboard"); else super.onBackPressed();
+    }
+    private void offlineNotice() {
+        LinearLayout box = card(page);
+        heading(box, SyncConfig.connected(this) ? "Локальный обзор" : "Данные на телефоне", 18);
+        label(box, SyncConfig.connected(this) ? "ПК сейчас недоступен. Здесь — сохранённые операции телефона; общие дашборды откроются после соединения." : "Подключи компьютер в настройках, чтобы открыть общие таблицы и ТОС-дашборды.", 13);
+        button(box, SyncConfig.connected(this) ? "Повторить соединение" : "Подключить компьютер", () -> {
+            if (SyncConfig.connected(this)) { offline = false; resetWeb(); render(); } else selectSection("settings");
         });
-        setContentView(scroll);
-        UIStyles.identity(page);
-        heading(page, "My Personal Throughput Accounting", 28);
-        label(page, "После оплаты — короткий вопрос «На что?». Сумма и магазин уже записаны.", 15);
+    }
+    private void periodControl() {
+        label(page, "Период", 12); LinearLayout periods = new LinearLayout(this); page.addView(periods);
+        int[] values = {7, 30, -1, 0}; String[] labels = {"7 дней", "30 дней", "Месяц", "Всё"};
+        for (int i = 0; i < values.length; i++) {
+            int days = values[i]; Button control = new Button(this); control.setText(labels[i]); UIStyles.button(control, days == period); control.setTextSize(12); control.setPadding(dp(4), dp(8), dp(4), dp(8));
+            LinearLayout.LayoutParams layout = new LinearLayout.LayoutParams(0, dp(48), 1); layout.setMargins(dp(2), 0, dp(2), 0); periods.addView(control, layout); control.setOnClickListener(v -> { period = days; render(); });
+        }
+    }
+    private String firstDate() { LocalDate today = LocalDate.now(Formats.ZONE); return period == 0 ? "0000-00-00" : period == -1 ? today.withDayOfMonth(1).toString() : today.minusDays(period - 1).toString(); }
+    private void renderLocalDashboard() {
+        heading(page, "Мои финансы", 28); periodControl();
+        String first = firstDate();
+        Map<String, long[]> totals = new LinkedHashMap<>();
+        Map<String, Long> byCategory = new LinkedHashMap<>(), byMerchant = new LinkedHashMap<>();
+        for (JSONObject row : store.summary(first)) {
+            String code = row.optString("currency"), kind = row.optString("kind");
+            long amount = row.optLong("amount_minor");
+            long[] sums = totals.get(code); if (sums == null) { sums = new long[3]; totals.put(code, sums); }
+            sums[kind.equals("expense") ? 0 : kind.equals("income") ? 1 : 2] += amount;
+        }
+        for (JSONObject row : store.breakdown(first, false)) byCategory.put(row.optString("label") + " · " + row.optString("currency"), row.optLong("amount_minor"));
+        for (JSONObject row : store.breakdown(first, true)) byMerchant.put(row.optString("label") + " · " + row.optString("currency"), row.optLong("amount_minor"));
+        LinearLayout summary = card(page);
+        heading(summary, period == 0 ? "По всей истории" : period == -1 ? "Этот месяц" : "За " + period + " дней", 21);
+        if (totals.isEmpty()) label(summary, "Нет учтённых операций за этот период.", 15);
+        for (Map.Entry<String, long[]> total : totals.entrySet()) {
+            label(summary, "Доходы · " + total.getKey(), 12);
+            heading(summary, Formats.displayAmount(total.getValue()[1]), 25);
+            label(summary, "Расходы · " + Formats.displayAmount(total.getValue()[0]) + " " + total.getKey(), 16);
+            label(summary, "Перемещения денег · " + Formats.displayAmount(total.getValue()[2]), 13);
+        }
+        label(summary, "Это учёт по полученным сообщениям. Неясные поступления, списания и возможные повторы исключены из сумм.", 13);
+        breakdown(page, "Куда уходят деньги", byCategory);
+        breakdown(page, "Магазины и сервисы", byMerchant);
+
+        button(page, "Добавить поступление", () -> startActivity(new Intent(this, IncomeActivity.class)));
+        offlineNotice();
+    }
+    private void renderLocalTable() {
+        heading(page, "Операции телефона", 28); periodControl();
+        button(page, "Добавить операцию", () -> edit(null));
+        String first = firstDate();
+        heading(page, "Операции и уведомления", 21);
+        button(page, showIgnored ? "Скрыть исключённые" : "Показать исключённые", () -> { showIgnored = !showIgnored; render(); });
+        int shown = 0;
+        for (JSONObject row : store.recent(first, showIgnored)) {
+            String state = row.optString("state");
+            if (state.equals("ignored") && !showIgnored) continue;
+            String date = row.optString("date", Formats.date(row.optLong("event_millis")));
+            if (state.equals("recorded") && date.compareTo(first) < 0) continue;
+            if (++shown > 100) { label(page, "Показаны первые 100 записей. Экспорт включает всю историю.", 13); break; }
+            LinearLayout box = card(page);
+            String merchant = row.optString("merchant", "");
+            heading(box, merchant.isEmpty() ? row.optString("source_name") : merchant, 17);
+            label(box, date + " " + row.optString("time", "") + " · " + row.optString("source_type"), 12);
+            if (!row.isNull("amount_minor")) label(box, Formats.displayAmount(row.optLong("amount_minor")) + " " + row.optString("currency"), 20);
+            label(box, state.equals("recorded") ? kindLabel(row.optString("kind")) + " · " + row.optString("category") : state.equals("ignored") ? "Исключено из учёта. Можно восстановить через сохранение." : row.optString("review_reason"), 14);
+            if (!row.optString("purpose", "").isEmpty()) label(box, "На что: " + row.optString("purpose"), 15);
+            button(box, state.equals("recorded") ? "Открыть / исправить" : "Уточнить", () -> edit(row));
+            if (PaymentPrompts.needsAnswer(row) || (!row.optString("purpose", "").isEmpty() && state.equals("recorded")))
+                button(box, row.optString("purpose", "").isEmpty() ? "На что потратил?" : "Изменить назначение", () -> purpose(row));
+            if (state.equals("recorded") && row.optString("kind").equals("expense")) button(box, "Категория продавца", () -> category(row));
+        }
+        if (shown == 0) label(page, "Здесь появятся сообщения после настройки сбора. Можно также поделиться банковским SMS в это приложение.", 15);
+
+        offlineNotice();
+    }
+    private void renderSettings() {
+        heading(page, "Настройки", 28); label(page, "МВ · Малик Валиходжаев", 14);
         LinearLayout setup = card(page);
         boolean access = notificationAccess(), enabled = CollectorConfig.enabled(this);
         heading(setup, enabled ? "Сбор включён" : "Сбор на паузе", 18);
@@ -127,88 +265,41 @@ public final class MainActivity extends Activity {
         if (!error.isEmpty()) label(setup, error, 13);
         String promptError = CollectorConfig.prefs(this).getString("promptError", "");
         if (!promptError.isEmpty() && asks) label(setup, promptError, 13);
-        LinearLayout shared = card(page); heading(shared, "Общая база", 20);
-        button(shared, "Добавить поступление", () -> startActivity(new Intent(this, IncomeActivity.class)));
-        label(shared, IncomeReminders.summary(this), 13);
+
+        LinearLayout shared = card(page); heading(shared, "Связь с компьютером", 20);
+        label(shared, SyncConfig.connected(this) ? "Общая база подключена" : "Общая база не подключена", 14);
         if (SyncConfig.connected(this)) {
             label(shared, "Ожидают отправки: " + store.pendingSync() + " · Конфликтов: " + store.syncConflicts(), 13);
             String lastSync = SyncConfig.prefs(this).getString("lastSync", "");
             if (!lastSync.isEmpty()) label(shared, "Последняя связь: " + java.time.Instant.parse(lastSync).atZone(Formats.ZONE).format(java.time.format.DateTimeFormatter.ofPattern("dd.MM HH:mm")), 13);
             String syncError = SyncConfig.prefs(this).getString("error", ""); if (!syncError.isEmpty()) label(shared, syncError, 13);
-            button(shared, "Мои дашборды", () -> openWeb("dashboard"));
-            button(shared, "Общая таблица операций", () -> openWeb("table"));
             button(shared, "Синхронизировать сейчас", this::syncNow);
-            button(shared, "Настроить связь с компьютером", this::configureSync);
-        } else {
-            label(shared, "Таблицы и дашборды на компьютере и в приложении. Операции отправятся после подключения к твоему серверу.", 14);
-            button(shared, "Подключить общую таблицу", this::configureSync);
         }
-        int statements = StatementInbox.list(this).size();
-        button(shared, statements > 0 ? "Полученные выписки: " + statements : "Выписки через «Поделиться»", () -> startActivity(new Intent(this, ImportActivity.class)));
+        button(shared, SyncConfig.connected(this) ? "Настроить связь с компьютером" : "Подключить компьютер", this::configureSync);
+        label(page, "Версия " + BuildInfo.VERSION + " · Сборка " + BuildInfo.COMMIT, 12);
+    }
+    private void renderData() {
+        heading(page, "Данные", 28); label(page, "Источники, загрузка истории и проверка операций", 14);
+        JSONObject statistics = store.statistics();
+        LinearLayout quality = card(page); heading(quality, "Нужно проверить", 20);
+        label(quality, "На уточнение: " + statistics.optInt("review") + " · Возможные повторы: " + statistics.optInt("duplicates"), 14);
+        label(quality, "Без категории: " + statistics.optInt("categories") + " · Без ответа «На что?»: " + statistics.optInt("unanswered"), 14);
+        button(quality, "Открыть операции телефона", () -> { offline = true; section = "table"; render(); });
+        LinearLayout statements = card(page); heading(statements, "Выписки и заказы", 20);
+        int count = StatementInbox.list(this).size();
+        button(statements, count > 0 ? "Полученные выписки: " + count : "Добавить банковскую выписку", () -> startActivity(new Intent(this, ImportActivity.class)));
+        label(statements, "PDF банков и Excel Payme можно отправить сюда через «Поделиться».", 13);
+        if (SyncConfig.connected(this)) button(statements, "Заказы сервисов", () -> openWeb("orders"));
         LinearLayout history = card(page); heading(history, "История банковских SMS", 20);
         label(history, "Забрать старые операции с телефона. Переводы и неясные поступления проверяются отдельно от расходов.", 14);
         JSONObject imported = store.historyState();
         if (imported.has("total")) label(history, "Просмотрено SMS: " + imported.optInt("scanned") + " из " + imported.optInt("total") + " · Добавлено операций: " + imported.optInt("inserted"), 13);
         button(history, "Импортировать старые SMS", () -> startActivity(new Intent(this, HistoryActivity.class)));
         button(history, "Проверить переводы между моими картами", () -> startActivity(new Intent(this, TransfersActivity.class)));
-        JSONObject statistics = store.statistics();
-        int pending = statistics.optInt("review"), duplicates = statistics.optInt("duplicates"), categories = statistics.optInt("categories"), unanswered = statistics.optInt("unanswered");
-        label(page, "Уточнить назначение: " + pending + " · Возможные повторы: " + duplicates + " · Без категории: " + categories, 14);
-        label(page, "Без ответа «На что?»: " + unanswered + ". Можно дополнить в карточке операции.", 14);
-        button(page, "Добавить наличные или другую операцию", () -> edit(null));
-        LinearLayout periods = new LinearLayout(this); periods.setOrientation(LinearLayout.HORIZONTAL); page.addView(periods);
-        for (int days : new int[]{7, 30, 0}) {
-            Button b = new Button(this); b.setText(days == 0 ? "Вся история" : days + " дней"); UIStyles.button(b, days == period);
-            periods.addView(b, new LinearLayout.LayoutParams(0, dp(52), 1));
-            b.setOnClickListener(v -> { period = days; render(); });
-        }
-        String first = period == 0 ? "0000-00-00" : LocalDate.now(Formats.ZONE).minusDays(period - 1).toString();
-        Map<String, long[]> totals = new LinkedHashMap<>();
-        Map<String, Long> byCategory = new LinkedHashMap<>(), byMerchant = new LinkedHashMap<>();
-        for (JSONObject row : store.summary(first)) {
-            String code = row.optString("currency"), kind = row.optString("kind");
-            long amount = row.optLong("amount_minor");
-            long[] sums = totals.get(code); if (sums == null) { sums = new long[3]; totals.put(code, sums); }
-            sums[kind.equals("expense") ? 0 : kind.equals("income") ? 1 : 2] += amount;
-        }
-        for (JSONObject row : store.breakdown(first, false)) byCategory.put(row.optString("label") + " · " + row.optString("currency"), row.optLong("amount_minor"));
-        for (JSONObject row : store.breakdown(first, true)) byMerchant.put(row.optString("label") + " · " + row.optString("currency"), row.optLong("amount_minor"));
-        LinearLayout summary = card(page);
-        heading(summary, period == 0 ? "По всей истории" : "За " + period + " дней", 21);
-        if (totals.isEmpty()) label(summary, "Нет учтённых операций за этот период.", 15);
-        for (Map.Entry<String, long[]> total : totals.entrySet()) {
-            heading(summary, Formats.displayAmount(total.getValue()[0]) + " " + total.getKey(), 25);
-            label(summary, "Расходы · Доходы: " + Formats.displayAmount(total.getValue()[1]) + " · Перемещения денег: " + Formats.displayAmount(total.getValue()[2]), 13);
-        }
-        label(summary, "Это учёт по полученным сообщениям. Неясные поступления, списания и возможные повторы исключены из сумм.", 13);
-        breakdown(page, "Куда уходят деньги", byCategory);
-        breakdown(page, "Магазины и сервисы", byMerchant);
-        heading(page, "Операции и уведомления", 21);
-        button(page, showIgnored ? "Скрыть исключённые" : "Показать исключённые", () -> { showIgnored = !showIgnored; render(); });
-        int shown = 0;
-        for (JSONObject row : store.recent(first, showIgnored)) {
-            String state = row.optString("state");
-            if (state.equals("ignored") && !showIgnored) continue;
-            String date = row.optString("date", Formats.date(row.optLong("event_millis")));
-            if (state.equals("recorded") && date.compareTo(first) < 0) continue;
-            if (++shown > 100) { label(page, "Показаны первые 100 записей. Экспорт включает всю историю.", 13); break; }
-            LinearLayout box = card(page);
-            String merchant = row.optString("merchant", "");
-            heading(box, merchant.isEmpty() ? row.optString("source_name") : merchant, 17);
-            label(box, date + " " + row.optString("time", "") + " · " + row.optString("source_type"), 12);
-            if (!row.isNull("amount_minor")) label(box, Formats.displayAmount(row.optLong("amount_minor")) + " " + row.optString("currency"), 20);
-            label(box, state.equals("recorded") ? kindLabel(row.optString("kind")) + " · " + row.optString("category") : state.equals("ignored") ? "Исключено из учёта. Можно восстановить через сохранение." : row.optString("review_reason"), 14);
-            if (!row.optString("purpose", "").isEmpty()) label(box, "На что: " + row.optString("purpose"), 15);
-            button(box, state.equals("recorded") ? "Открыть / исправить" : "Уточнить", () -> edit(row));
-            if (PaymentPrompts.needsAnswer(row) || (!row.optString("purpose", "").isEmpty() && state.equals("recorded")))
-                button(box, row.optString("purpose", "").isEmpty() ? "На что потратил?" : "Изменить назначение", () -> purpose(row));
-            if (state.equals("recorded") && row.optString("kind").equals("expense")) button(box, "Категория продавца", () -> category(row));
-        }
-        if (shown == 0) label(page, "Здесь появятся сообщения после настройки сбора. Можно также поделиться банковским SMS в это приложение.", 15);
-        button(page, "Обновить", this::render);
-        button(page, "Экспорт операций · CSV", () -> export(false));
-        button(page, "Резервная копия с исходными сообщениями · JSON", () -> export(true));
-        label(page, "Версия " + BuildInfo.VERSION + " · Сборка " + BuildInfo.COMMIT + " · Операции сохраняются на телефоне и после подключения синхронизируются с твоим ПК.", 12);
+
+        LinearLayout exports = card(page); heading(exports, "Экспорт и резервная копия", 20);
+        button(exports, "Экспорт операций · CSV", () -> export(false));
+        button(exports, "Исходные сообщения · JSON", () -> export(true));
     }
     private void openWeb(String tab) { Intent intent = new Intent(this, WebActivity.class); intent.putExtra("tab", tab); startActivity(intent); }
     private void configureSync() {
@@ -219,14 +310,14 @@ public final class MainActivity extends Activity {
         AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Подключить общую таблицу").setView(fields).setPositiveButton("Подключить", null).setNegativeButton("Отмена", null).create();
         if (SyncConfig.connected(this)) {
             Button disconnect = new Button(this); disconnect.setText("Отключить синхронизацию"); disconnect.setAllCaps(false); fields.addView(disconnect);
-            disconnect.setOnClickListener(v -> { SyncJobs.cancel(this); SyncConfig.prefs(this).edit().remove("token").remove("error").apply(); android.webkit.CookieManager.getInstance().removeAllCookies(null); dialog.dismiss(); render(); });
+            disconnect.setOnClickListener(v -> { SyncJobs.cancel(this); SyncConfig.prefs(this).edit().remove("token").remove("error").apply(); android.webkit.CookieManager.getInstance().removeAllCookies(null); resetWeb(); dialog.dismiss(); render(); });
         }
         dialog.setOnShowListener(v -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(button -> {
             String target = url.getText().toString(), pairingCode = code.getText().toString().trim();
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);
             new Thread(() -> { try {
                 SyncEngine.pair(this, target, pairingCode);
-                runOnUiThread(() -> { dialog.dismiss(); render(); syncNow(); });
+                runOnUiThread(() -> { resetWeb(); dialog.dismiss(); render(); syncNow(); });
             } catch (Exception error) { runOnUiThread(() -> { dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(true); toast(error.getMessage()); }); } }, "rhythm-pair").start();
         })); dialog.show();
     }

@@ -143,7 +143,8 @@ test('HTTP: данные закрыты, код одноразовый, токе
     const row = sample(); const synced = await fetch(url + '/api/sync', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + device.token }, body: JSON.stringify({ cursor: 0, changes: [{ event: row, clientRevision: 1, baseVersion: 0 }] }) }); assert.equal(synced.status, 200);
     const mobileHeaders = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + device.token };
     const ticket = await (await fetch(url + '/api/mobile/browser-session', { method: 'POST', headers: mobileHeaders, body: '{}' })).json();
-    const mobileLogin = await fetch(url + ticket.path, { redirect: 'manual' }); assert.equal(mobileLogin.status, 303);
+    const mobileLogin = await fetch(url + ticket.path + '&tab=dashboard&embedded=1', { redirect: 'manual' }); assert.equal(mobileLogin.status, 303);
+    assert.equal(mobileLogin.headers.get('location'), '/?tab=dashboard&embedded=1');
     const browserCookie = mobileLogin.headers.get('set-cookie').split(';')[0]; assert.equal((await fetch(url + '/api/events', { headers: { Cookie: browserCookie } })).status, 200);
     assert.equal((await fetch(url + ticket.path, { redirect: 'manual' })).status, 401);
     await fetch(url + '/api/events/' + row.id, { method: 'PATCH', headers, body: JSON.stringify({ expectedVersion: 1, event: { purpose: 'дом' } }) });

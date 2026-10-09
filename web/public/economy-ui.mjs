@@ -7,7 +7,11 @@ export async function renderEconomy(panel, context) {
   const currency = select([...new Set(['UZS', ...state.meta.currencies])].map(code => [code, code]), state.economyCurrency || 'UZS'); currency.setAttribute('aria-label', 'Валюта экономики');
   const actual = el('section', { class: 'widget economy-actual', 'aria-label': 'Факт личной экономики' }), scenario = el('section', { id: 'economy-monthly-model', class: 'widget economy-scenario', 'aria-label': 'Месячная модель экономики' });
   const explanation = el('p', { class: 'subtle', text: 'Личная адаптация throughput-модели по полученным и потраченным деньгам: заработок − прямые переменные затраты = throughput; затем вычитаются рабочие расходы и расходы на жизнь. Инвестиционные платежи показаны отдельно.' });
-  panel.replaceChildren(explanation, el('div', { class: 'filters' }, field('Факт за месяц', month), field('Валюта', currency), button('Вся история', () => { month.value = ''; state.economyMonth = ''; return refresh(); }, true), el('a', { href: '#economy-monthly-model', text: 'Модель обычного месяца' })), actual, scenario);
+  const compact = document.documentElement.classList.contains('embedded-app');
+  const controls = el('div', { class: 'filters economy-controls' }, field('Период', month), field('Валюта', currency), button('Вся история', () => { month.value = ''; state.economyMonth = ''; return refresh(); }, true));
+  const help = el('details', { class: 'economy-help' }, el('summary', { text: 'Как считается моя экономика' }), explanation);
+  const model = el('a', { href: '#economy-monthly-model', text: 'Модель обычного месяца' });
+  panel.replaceChildren(...(compact ? [controls, actual, help, model, scenario] : [explanation, controls, model, actual, scenario]));
   state.economyDrafts ||= {};
   let report, plan, request = 0;
   const periodFilters = () => {
@@ -38,7 +42,7 @@ export async function renderEconomy(panel, context) {
   }
   function drawActual() {
     const total = report.totals.find(item => item.currency === currency.value);
-    const head = el('div', { class: 'chart-heading' }, el('div', {}, el('h2', { text: 'Факт · ' + (month.value || 'вся история') }), el('p', { class: 'subtle', text: 'Только подтверждённые операции с назначенной ролью. Переводы между своими картами, повторы и история заказов не прибавляются к заработку.' })), button('Операции периода', () => table({ currency: currency.value }), true));
+    const head = el('div', { class: 'chart-heading' }, el('div', {}, el('h2', { text: 'Факт · ' + (month.value || 'вся история') }), el('p', { class: 'subtle economy-fact-note', text: 'Только подтверждённые операции с назначенной ролью. Переводы между своими картами, повторы и история заказов не прибавляются к заработку.' })), button('Операции периода', () => table({ currency: currency.value }), true));
     actual.replaceChildren(head);
     if (!total) { actual.append(el('p', { text: 'За выбранный период нет распознанных сумм в этой валюте. Это не означает нулевой доход или расход.' })); return; }
     const known = total.earnedCount > 0;

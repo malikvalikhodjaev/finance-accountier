@@ -5,6 +5,14 @@ const kinds = { expense: 'Расход', income: 'Доход', transfer: 'Сво
 const flows = { incoming: 'Поступление', outgoing: 'Списание', unknown: 'Не определено' };
 const defaults = ['date', 'merchant', 'amount_minor', 'currency', 'kind', 'category', 'purpose', 'state'];
 const initialTab = new URL(location.href).searchParams.get('tab');
+const embedded = new URL(location.href).searchParams.get('embedded') === '1';
+if (embedded) document.documentElement.classList.add('embedded-app');
+function route(tab, board = '') {
+  const params = new URLSearchParams({ tab });
+  if (board) params.set('board', board);
+  if (embedded) params.set('embedded', '1');
+  history.replaceState(null, '', '/?' + params);
+}
 const state = { meta: null, tab: ['table', 'orders'].includes(initialTab) ? initialTab : 'dashboard', filters: { period: 'all' }, columns: [...defaults], viewId: '', boardId: new URL(location.href).searchParams.get('board') || 'economy', chartGroup: 'month', chartCurrency: '', rows: [], total: 0, offset: 0, generation: 0 };
 let saveDialog, timer, tablePanel, dialogGeneration = 0;
 function el(tag, properties = {}, ...children) {
@@ -130,6 +138,8 @@ async function resumeStatementImport() {
 }
 function name(key) { return names[key] || state.meta.fields.find(field => field.id === key)?.name || key; }
 async function render() {
+  route(state.tab, state.tab === 'dashboard' ? state.boardId : '');
+  document.title = (state.tab === 'table' ? 'Таблицы' : state.tab === 'orders' ? 'Заказы' : 'Дашборды') + ' · My Personal Throughput Accounting';
   for (const b of document.querySelectorAll('[data-tab]')) b.classList.toggle('active', b.dataset.tab === state.tab);
   app.replaceChildren(); state.generation++;
   if (state.tab === 'table') renderTable(); else if (state.tab === 'orders') renderOrders().catch(error => message(error.message)); else renderDashboard();
@@ -435,7 +445,15 @@ function login() {
   form.onsubmit = async event => { event.preventDefault(); try { await api('/api/login', { method: 'POST', body: { password: password.value } }); await loadMeta(); await render(); await resumeStatementImport(); } catch (problem) { error.textContent = problem.message; } };
   app.replaceChildren(el('section', { class: 'login' }, el('h1', { text: 'Войти в My Personal Throughput Accounting' }), el('p', { text: 'На основном компьютере открой 127.0.0.1:8788. Телефон подключается кодом из окна «Подключение».' }), form));
 }
-for (const item of document.querySelectorAll('[data-tab]')) item.onclick = () => { if (!state.meta) return; state.tab = item.dataset.tab; history.replaceState(null, '', '/?tab=' + state.tab); render(); };
+window.financeNavigate = tab => {
+  if (!['dashboard', 'table'].includes(tab)) return;
+  const changed = state.tab !== tab;
+  if (changed && dialog.open) dialog.close();
+  state.tab = tab; route(tab, tab === 'dashboard' ? state.boardId : '');
+  if (state.meta && changed) render();
+  return tab;
+};
+for (const item of document.querySelectorAll('[data-tab]')) item.onclick = () => { if (!state.meta) return; state.tab = item.dataset.tab; render(); };
 document.querySelector('#connect').onclick = () => state.meta ? connection() : login();
 async function start() { try { await loadMeta(); await render(); await resumeStatementImport(); } catch (error) { if (error.status === 401) login(); else app.replaceChildren(el('p', { text: 'Компьютер недоступен: ' + error.message }), button('Повторить', start)); } }
 start();

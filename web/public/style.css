@@ -185,6 +185,39 @@ a { color: #535358; }
 .income-date-row { display: flex; align-items: center; gap: .5rem; }
 .income-date-row input { min-width: 0; flex: 1; }
 .income-date-row button { flex: 0 0 auto; }
+.embedded-app header { display: none; }
+.embedded-app main { max-width: 100%; padding: .5rem 1rem 1.5rem; }
+.embedded-app h1 { font-size: 1.65rem; }
+.embedded-app .toolbar { margin-bottom: 1rem; }
+.embedded-app .toolbar .row { width: 100%; justify-content: space-between; }
+.embedded-app .toolbar select { max-width: 100%; }
+.embedded-app .toolbar h1 { display: none; }
+.embedded-app .toolbar select { width: 100%; font-size: 1.1rem; font-weight: 600; }
+.embedded-app .economy-controls { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .65fr); padding: .8rem; margin: .8rem 0; gap: .6rem; }
+.embedded-app .economy-controls .field { width: auto; min-width: 0; }
+.embedded-app .economy-controls label { font-size: .75rem; }
+.embedded-app .economy-controls input, .embedded-app .economy-controls select { min-width: 0; width: 100%; min-height: 44px; font-size: .875rem; padding: .5rem; }
+.embedded-app .economy-controls > button { grid-column: 1 / -1; min-height: 38px; padding: .4rem .7rem; font-size: .8rem; }
+.embedded-app .economy-actual { padding: .9rem; }
+.embedded-app .economy-fact-note { display: none; }
+.embedded-app .economy-actual .chart-heading { gap: .5rem; align-items: center; }
+.embedded-app .economy-actual .chart-heading h2 { font-size: 1.05rem; margin: 0; }
+.embedded-app .economy-actual .chart-heading button { min-height: 38px; padding: .4rem .6rem; font-size: .75rem; }
+.embedded-app .economy-badge { font-size: .75rem; line-height: 1.4; margin-top: .75rem; }
+.embedded-app .economy-grid { gap: .6rem; margin: .8rem 0; }
+.embedded-app .economy-metric > span { font-size: .75rem; }
+.embedded-app .economy-metric strong { font-size: 1rem; }
+.embedded-app .economy-metric small { font-size: .7rem; }
+.embedded-app .economy-help { margin: 1rem 0; }
+.embedded-app .economy-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.embedded-app .economy-metric { min-width: 0; }
+.embedded-app .economy-metric strong { overflow-wrap: anywhere; }
+.embedded-app .chart-totals { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.embedded-app .chart-total.incoming { grid-column: 1 / -1; }
+.embedded-app #message { bottom: 1rem; }
+@media (max-width: 340px) {
+  .embedded-app .economy-grid, .embedded-app .chart-totals { grid-template-columns: 1fr; }
+}
 .brand-mark { flex: 0 0 40px; border-radius: 11px; }
 .brand .brand-name { min-width: 0; color: #1d1d1f; font-size: 1.15rem; font-weight: 650; letter-spacing: -.03em; }
 .brand .brand-subtitle { font-size: .875rem; font-weight: 450; color: #6e6e73; line-height: 1.35; }
