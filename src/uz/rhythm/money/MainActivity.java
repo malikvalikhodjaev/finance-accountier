@@ -90,7 +90,7 @@ public final class MainActivity extends Activity {
             return insets;
         });
         setContentView(scroll);
-        heading(page, "Деньги", 30);
+        heading(page, "Personal Throughput Accounting", 24);
         label(page, "После оплаты — короткий вопрос «На что?». Сумма и магазин уже записаны.", 15);
         LinearLayout setup = card(page);
         boolean access = notificationAccess(), enabled = CollectorConfig.enabled(this);
@@ -199,14 +199,14 @@ public final class MainActivity extends Activity {
         }
         if (shown == 0) label(page, "Здесь появятся сообщения после настройки сбора. Можно также поделиться банковским SMS в это приложение.", 15);
         button(page, "Обновить", this::render);
-        button(page, "Экспорт операций в «Ритм» · CSV", () -> export(false));
+        button(page, "Экспорт операций · CSV", () -> export(false));
         button(page, "Резервная копия с исходными сообщениями · JSON", () -> export(true));
         label(page, "Версия " + BuildInfo.VERSION + " · Сборка " + BuildInfo.COMMIT + " · Операции сохраняются на телефоне и после подключения синхронизируются с твоим ПК.", 12);
     }
     private void openWeb(String tab) { Intent intent = new Intent(this, WebActivity.class); intent.putExtra("tab", tab); startActivity(intent); }
     private void configureSync() {
         LinearLayout fields = vertical(); fields.setPadding(dp(20), dp(10), dp(20), dp(10));
-        label(fields, "Открой Ритм · деньги на ПК → Подключение → Получить код. Телефон и компьютер должны быть в одной Wi-Fi-сети.", 14);
+        label(fields, "Открой Personal Throughput Accounting на ПК → Подключение → Получить код. Телефон и компьютер должны быть в одной Wi-Fi-сети.", 14);
         EditText url = input(fields, "Адрес с компьютера", SyncConfig.url(this), InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
         EditText code = input(fields, "Шестизначный код", "", InputType.TYPE_CLASS_NUMBER);
         AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Подключить общую таблицу").setView(fields).setPositiveButton("Подключить", null).setNegativeButton("Отмена", null).create();

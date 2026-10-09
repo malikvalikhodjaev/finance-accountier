@@ -27,7 +27,7 @@ public final class WebActivity extends Activity {
         super.onCreate(state); page = new LinearLayout(this); page.setOrientation(LinearLayout.VERTICAL); page.setBackgroundColor(Color.WHITE); setContentView(page);
         getWindow().setStatusBarColor(Color.WHITE); getWindow().setNavigationBarColor(Color.WHITE); getWindow().getDecorView().setSystemUiVisibility(android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | android.view.View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
         page.setOnApplyWindowInsetsListener((view, insets) -> { page.setPadding(0, insets.getSystemWindowInsetTop(), 0, insets.getSystemWindowInsetBottom()); return insets; });
-        Button back = new Button(this); back.setText("К сборщику · Ритм деньги"); back.setAllCaps(false); back.setOnClickListener(v -> finish()); page.addView(back);
+        Button back = new Button(this); back.setText("К сборщику · Personal Throughput Accounting"); back.setAllCaps(false); back.setOnClickListener(v -> finish()); page.addView(back);
         TextView loading = new TextView(this); loading.setText("Открываю общую базу…"); loading.setTextSize(16); loading.setPadding(24, 24, 24, 24); page.addView(loading);
         new Thread(() -> {
             try {

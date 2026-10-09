@@ -195,9 +195,9 @@ export function createFinanceServer({ directory = path.join(root, '.web'), allow
         const rows = selectRows(store.all(), Object.fromEntries(url.searchParams)), fields = store.settings('field').filter(field => field.active), columns = ['id', 'date', 'time', 'merchant', 'amount', 'currency', 'kind', 'category', 'purpose', 'description', 'state', ...fields.map(field => field.id)];
         const cell = value => '"' + (/^\s*[=+\-@]/.test(String(value)) ? "'" : '') + String(value ?? '').replaceAll('"', '""') + '"';
         const csv = [columns.map(key => cell(fields.find(field => field.id === key)?.name || key)).join(','), ...rows.map(row => columns.map(key => cell(key === 'amount' ? row.amount_minor === null ? '' : (BigInt(row.amount_minor) / 100n) + '.' + String(BigInt(row.amount_minor) % 100n).padStart(2, '0') : key.startsWith('f_') ? row.custom[key] ?? '' : row[key] ?? '')).join(','))].join('\r\n');
-        res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="rhythm-money.csv"' }); return res.end('\uFEFF' + csv);
+        res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="personal-throughput-accounting.csv"' }); return res.end('\uFEFF' + csv);
       }
-      if (req.method === 'GET' && url.pathname === '/api/backup') { res.setHeader('Content-Disposition', 'attachment; filename="rhythm-money-backup.json"'); return json(res, 200, { schema: 'rhythm-money-web-v1', exportedAt: new Date().toISOString(), events: store.all(), history: store.db.prepare('SELECT * FROM history').all(), sourceRevisions: store.db.prepare('SELECT * FROM source_revisions').all(), fields: store.settings('field'), views: store.settings('view'), dashboards: store.settings('dashboard'), serviceOrders: orders.backup(), economy: economy.backup(), personalAssets: personalAssets.backup() }); }
+      if (req.method === 'GET' && url.pathname === '/api/backup') { res.setHeader('Content-Disposition', 'attachment; filename="personal-throughput-accounting-backup.json"'); return json(res, 200, { schema: 'rhythm-money-web-v1', exportedAt: new Date().toISOString(), events: store.all(), history: store.db.prepare('SELECT * FROM history').all(), sourceRevisions: store.db.prepare('SELECT * FROM source_revisions').all(), fields: store.settings('field'), views: store.settings('view'), dashboards: store.settings('dashboard'), serviceOrders: orders.backup(), economy: economy.backup(), personalAssets: personalAssets.backup() }); }
       fail('Страница не найдена.', 404);
     } catch (error) {
       if (!error.status && !(error instanceof SyntaxError)) console.error(error);
@@ -210,7 +210,7 @@ export function createFinanceServer({ directory = path.join(root, '.web'), allow
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const port = Number(process.env.FINANCE_PORT || 8788);
   const app = createFinanceServer({ port, directory: process.env.FINANCE_DATA_DIR || path.join(root, '.web'), advertisedHost: process.env.FINANCE_HOST || null });
-  app.server.listen(port, '0.0.0.0', () => { writeFileSync(path.join(root, '.web', 'server.json'), JSON.stringify({ port, url: 'http://' + app.host + ':' + port, pid: process.pid })); console.log('Ритм · деньги: http://127.0.0.1:' + port + '\nНа телефоне: http://' + app.host + ':' + port); });
+  app.server.listen(port, '0.0.0.0', () => { writeFileSync(path.join(root, '.web', 'server.json'), JSON.stringify({ port, url: 'http://' + app.host + ':' + port, pid: process.pid })); console.log('Personal Throughput Accounting: http://127.0.0.1:' + port + '\nНа телефоне: http://' + app.host + ':' + port); });
   app.server.on('error', error => { console.error(error.code === 'EADDRINUSE' ? 'Порт занят; проверь уже запущенный финансовый сервер.' : error.message); app.store.close(); process.exitCode = 1; });
   for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => app.close().then(() => process.exit(0)));
 }

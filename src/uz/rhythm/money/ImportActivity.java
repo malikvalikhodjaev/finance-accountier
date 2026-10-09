@@ -39,7 +39,7 @@ public final class ImportActivity extends Activity {
         ScrollView scroll = new ScrollView(this); page = new LinearLayout(this); page.setOrientation(LinearLayout.VERTICAL); page.setPadding(28, 28, 28, 28); page.setBackgroundColor(Color.WHITE); scroll.addView(page);
         scroll.setOnApplyWindowInsetsListener((view, insets) -> { page.setPadding(28, 28 + insets.getSystemWindowInsetTop(), 28, 28 + insets.getSystemWindowInsetBottom()); return insets; }); setContentView(scroll);
         text("Выписки", 26);
-        text("Отправь PDF банка или Excel Payme через «Поделиться → Ритм · деньги». Поддерживаются выписка Uzum на английском, история Ipak Yuli и XLSX Payme. Выбери источник, затем проверь операции.", 16);
+        text("Отправь PDF банка или Excel Payme через «Поделиться → Personal Throughput Accounting». Поддерживаются выписка Uzum на английском, история Ipak Yuli и XLSX Payme. Выбери источник, затем проверь операции.", 16);
         if (!status.isEmpty()) text(status, 16);
         if (busy) text("Подожди завершения. Операции ещё не добавляются в таблицу.", 14);
         boolean found = false;
@@ -48,7 +48,7 @@ public final class ImportActivity extends Activity {
             text(item.optString("filename"), 19);
             text(item.has("importId") ? "Файл сохранён на ПК. Можно продолжить проверку." : "Файл сохранён на телефоне. Для проверки нужен домашний ПК и Wi-Fi.", 14);
             action(item.has("importId") ? "Продолжить проверку" : "Отправить на проверку", () -> { selected = id; if (item.has("importId")) upload(); else chooseSource(id); });
-            action("Убрать копию из Ритма", () -> new AlertDialog.Builder(this).setMessage("Убрать только сохранённую копию из Ритма? Исходный файл и операции в общей базе сохранятся.").setNegativeButton("Оставить", null).setPositiveButton("Убрать", (dialog, which) -> { try { StatementInbox.remove(this, id); if (id.equals(selected)) selected = null; status = "Копия убрана из Ритма."; } catch (RuntimeException error) { status = error.getMessage(); } render(); }).show());
+            action("Убрать копию из приложения", () -> new AlertDialog.Builder(this).setMessage("Убрать только сохранённую копию из приложения? Исходный файл и операции в общей базе сохранятся.").setNegativeButton("Оставить", null).setPositiveButton("Убрать", (dialog, which) -> { try { StatementInbox.remove(this, id); if (id.equals(selected)) selected = null; status = "Копия убрана из приложения."; } catch (RuntimeException error) { status = error.getMessage(); } render(); }).show());
         }
         if (selected != null && !found) selected = null;
         if (StatementInbox.list(this).isEmpty() && !busy) text("Полученных выписок пока нет.", 16);

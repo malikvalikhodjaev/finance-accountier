@@ -13,4 +13,4 @@ if (!await ready()) {
   if (!online) throw new Error('Сервер не запустился. Проверь .web/server-errors.log.');
 }
 spawn('powershell.exe', ['-NoProfile', '-Command', 'Start-Process', url], { windowsHide: true, stdio: 'ignore' }).unref();
-console.log('Ритм · деньги: ' + url);
+console.log('Personal Throughput Accounting: ' + url);

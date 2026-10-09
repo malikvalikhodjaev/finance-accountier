@@ -63,7 +63,7 @@ run(java, ['-jar', path.join(tools, 'lib/apksigner.jar'), 'verify', '--verbose',
 run(path.join(tools, 'zipalign.exe'), ['-c', '-p', '4', path.relative(root, signed)]);
 run(path.join(tools, 'aapt2.exe'), ['dump', 'badging', path.relative(root, signed)]);
 const sha256 = createHash('sha256').update(readFileSync(signed)).digest('hex');
-const filename = 'rhythm-money-' + version.name + '-' + commitId + (revision.dirty ? '-dev' : '') + '-' + sha256.slice(0, 8) + '.apk';
+const filename = 'personal-throughput-accounting-' + version.name + '-' + commitId + (revision.dirty ? '-dev' : '') + '-' + sha256.slice(0, 8) + '.apk';
 const apk = path.join(output, filename);
 if (existsSync(apk)) {
   if (createHash('sha256').update(readFileSync(apk)).digest('hex') !== sha256) throw new Error('Существующий APK отличается; сохранён без изменения.');

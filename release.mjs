@@ -79,7 +79,7 @@ if (args.includes('--help') || !args.length) {
       }
       const head = git(['rev-parse', 'HEAD']), artifact = latestBuild();
       if (artifact.commit !== head || artifact.dirty || sourceRevision().dirty || artifact.version !== next || artifact.versionCode !== readVersion().code) throw new Error('APK не соответствует чистому сохранённому коммиту.');
-      if (!taggedCommit(tag)) git(['tag', '-a', tag, '-m', 'Ритм · деньги ' + next]);
+      if (!taggedCommit(tag)) git(['tag', '-a', tag, '-m', 'Personal Throughput Accounting ' + next]);
       if (taggedCommit(tag) !== head) throw new Error('Тег указывает на другой коммит.');
       if (push) {
         console.log('Отправляю исходники и теги в origin.');
