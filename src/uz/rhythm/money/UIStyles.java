@@ -1,12 +1,16 @@
 package uz.rhythm.money;
 
 import android.app.Activity;
+import android.animation.ObjectAnimator;
+import android.animation.PropertyValuesHolder;
+import android.animation.StateListAnimator;
 import android.content.Context;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
+import android.graphics.drawable.StateListDrawable;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
@@ -18,7 +22,7 @@ final class UIStyles {
     static final int INK = Color.rgb(29, 29, 31);
     static final int MUTED = Color.rgb(110, 110, 115);
     static final int BACKGROUND = Color.rgb(245, 245, 247);
-    static final int ACCENT = Color.rgb(0, 122, 255);
+    static final int ACCENT = Color.rgb(57, 57, 61);
     static final int LINE = Color.rgb(229, 229, 234);
 
     private UIStyles() {}
@@ -48,15 +52,32 @@ final class UIStyles {
         view.setAllCaps(false);
         view.setTextSize(16);
         view.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        view.setTextColor(new ColorStateList(new int[][] { new int[] { -android.R.attr.state_enabled }, new int[] {} }, new int[] { MUTED, primary ? Color.WHITE : ACCENT }));
+        view.setTextColor(new ColorStateList(new int[][] { new int[] { -android.R.attr.state_enabled }, new int[] {} }, new int[] { MUTED, primary ? Color.WHITE : INK }));
         view.setMinHeight(dp(context, 48));
         view.setMinimumHeight(dp(context, 48));
         view.setMinWidth(0);
         view.setMinimumWidth(0);
         view.setPadding(dp(context, 16), dp(context, 12), dp(context, 16), dp(context, 12));
-        view.setBackground(new RippleDrawable(ColorStateList.valueOf(primary ? 0x33ffffff : 0x1a007aff), rounded(context, primary ? ACCENT : Color.rgb(239, 245, 255), 12, false), null));
-        view.setStateListAnimator(null);
-        view.setElevation(0);
+        GradientDrawable surface = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+            primary ? new int[]{Color.rgb(75, 75, 80), Color.rgb(43, 43, 47)} : new int[]{Color.WHITE, Color.rgb(237, 237, 240)});
+        surface.setCornerRadius(dp(context, 12));
+        surface.setStroke(dp(context, 1), primary ? Color.rgb(73, 73, 78) : Color.rgb(207, 207, 213));
+        StateListDrawable background = new StateListDrawable();
+        background.addState(new int[]{-android.R.attr.state_enabled}, rounded(context, Color.rgb(233, 233, 237), 12, true));
+        background.addState(new int[]{}, new RippleDrawable(ColorStateList.valueOf(primary ? 0x22ffffff : 0x12000000), surface, null));
+        view.setBackground(background);
+        StateListAnimator depth = new StateListAnimator();
+        depth.addState(new int[]{android.R.attr.state_pressed, android.R.attr.state_enabled}, depth(view, 1, 1));
+        depth.addState(new int[]{-android.R.attr.state_enabled}, depth(view, 0, 0));
+        depth.addState(new int[]{}, depth(view, 4, 0));
+        view.setStateListAnimator(depth);
+        view.setElevation(dp(context, 4));
+    }
+    private static ObjectAnimator depth(Button view, int elevation, int offset) {
+        ObjectAnimator animation = ObjectAnimator.ofPropertyValuesHolder(view,
+            PropertyValuesHolder.ofFloat("elevation", dp(view.getContext(), elevation)),
+            PropertyValuesHolder.ofFloat("translationY", dp(view.getContext(), offset)));
+        animation.setDuration(100); return animation;
     }
     static void input(EditText view) {
         text(view, 16);

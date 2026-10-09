@@ -2,7 +2,7 @@
 <resources>
     <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:fontFamily">sans-serif</item>
-        <item name="android:colorAccent">#007AFF</item>
+        <item name="android:colorAccent">#39393D</item>
         <item name="android:colorControlNormal">#6E6E73</item>
         <item name="android:windowBackground">#F5F5F7</item>
         <item name="android:statusBarColor">#F5F5F7</item>
@@ -10,7 +10,7 @@
         <item name="android:windowLightStatusBar">true</item>
     </style>
     <style name="IncomeCalendarTheme" parent="android:style/Theme.Material.Light.Dialog.Alert">
-        <item name="android:colorAccent">#007AFF</item>
+        <item name="android:colorAccent">#39393D</item>
         <item name="android:fontFamily">sans-serif</item>
         <item name="android:datePickerStyle">@style/IncomeCalendarWidget</item>
     </style>

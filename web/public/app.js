@@ -316,7 +316,7 @@ function drawCashflow(panel, series, group) {
   if (series.adjusted) panel.append(el('p', { class: 'subtle', text: 'Для длинной истории показаны месяцы. Выбери меньший период, чтобы увидеть дни или недели.' }));
   const item = series.currencies.find(item => item.currency === currency.value);
   if (!item?.points.length) { panel.append(el('p', { text: 'За этот период нет загруженных операций с датой и валютой.' })); return; }
-  const metrics = [['income', 'Подтверждённые доходы', '#248a3d'], ['expense', 'Расходы', '#c43c32'], ['incoming', 'Все поступления на карты', '#007aff']], enabled = { income: state.chartIncome !== false, expense: state.chartExpense !== false, incoming: state.chartIncoming === true };
+  const metrics = [['income', 'Подтверждённые доходы', '#333336'], ['expense', 'Расходы', '#8a8a91'], ['incoming', 'Все поступления на карты', '#c1c1c8']], enabled = { income: state.chartIncome !== false, expense: state.chartExpense !== false, incoming: state.chartIncoming === true };
   const summary = el('div', { class: 'chart-totals' }), legend = el('div', { class: 'chart-legend' });
   for (const [key, name, color] of metrics) {
     summary.append(el('div', { class: 'chart-total ' + key }, el('span', { text: name }), el('strong', { text: money(item.totals[key + 'Minor']) + ' ' + item.currency }), el('small', { text: item.totals[key + 'Count'] + ' операций' })));
