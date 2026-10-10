@@ -7,11 +7,13 @@ export async function renderEconomy(panel, context) {
   const currency = select([...new Set(['UZS', ...state.meta.currencies])].map(code => [code, code]), state.economyCurrency || 'UZS'); currency.setAttribute('aria-label', 'Валюта экономики');
   const actual = el('section', { class: 'widget economy-actual', 'aria-label': 'Факт личной экономики' }), scenario = el('section', { id: 'economy-monthly-model', class: 'widget economy-scenario', 'aria-label': 'Месячная модель экономики' });
   const explanation = el('p', { class: 'subtle', text: 'Личная адаптация throughput-модели по полученным и потраченным деньгам: заработок − прямые переменные затраты = throughput; затем вычитаются рабочие расходы и расходы на жизнь. Инвестиционные платежи показаны отдельно.' });
-  const compact = document.documentElement.classList.contains('embedded-app');
+  const compact = document.documentElement.classList.contains('embedded-app') || window.innerWidth <= 700;
   const controls = el('div', { class: 'filters economy-controls' }, field('Период', month), field('Валюта', currency), button('Вся история', () => { month.value = ''; state.economyMonth = ''; return refresh(); }, true));
   const help = el('details', { class: 'economy-help' }, el('summary', { text: 'Как считается моя экономика' }), explanation);
   const model = el('a', { href: '#economy-monthly-model', text: 'Модель обычного месяца' });
-  panel.replaceChildren(...(compact ? [controls, actual, help, model, scenario] : [explanation, controls, model, actual, scenario]));
+  const fold = el('details', { class: 'economy-model-fold' }, el('summary', { text: 'Модель обычного месяца' }), scenario); fold.open = !!state.economyModelOpen;
+  fold.ontoggle = () => state.economyModelOpen = fold.open;
+  panel.replaceChildren(...(compact ? [controls, actual, help, fold] : [explanation, controls, model, actual, scenario]));
   state.economyDrafts ||= {};
   let report, plan, request = 0, actualKey = '', planKey = '';
   const periodFilters = () => {
@@ -54,7 +56,7 @@ export async function renderEconomy(panel, context) {
     actual.append(el('div', { class: 'economy-grid' }, metric('Полученный заработок', known ? total.earned : null), metric('Прямые переменные затраты', cost('variable'), 'По размеченным операциям'), metric('Throughput · T', total.throughputMinor, 'Заработок − прямые затраты'), metric('Рабочие расходы · OE', cost('work'), 'Расходы, не зависящие напрямую от объёма заработка'), metric('Результат работы', total.operatingMinor, 'T − рабочие расходы'), metric('Расходы на жизнь', cost('living')), metric('Личный остаток', total.personalMinor, 'Результат работы − личные расходы'), metric('Инвестиционные платежи', cost('investment')), metric('После инвестиций', total.availableMinor, 'Личный остаток − инвестиционные платежи')));
     actual.append(el('p', { class: 'subtle', text: 'Прочие доходы: ' + money(total.other) + ' ' + currency.value + '. Финансирование: ' + money(total.financing) + ' ' + currency.value + '. Это отдельные движения. Остаток модели не является балансом карт.' }));
     const coverage = el('div', { class: 'economy-coverage' }, el('h3', { text: 'Что ещё нужно разобрать' }), el('p', { text: 'Подтверждённые расходы без роли: ' + money(total.unassignedExpense) + ' ' + currency.value + '. Доходы без роли: ' + money(total.unassignedIncome) + ' ' + currency.value + '.' }), el('p', { class: 'subtle', text: 'На уточнении: ' + total.pendingCount + ' операций; поступления с известной суммой — ' + money(total.pendingIncoming) + ' ' + currency.value + '. Они не считаются заработком. Записей без суммы, даты или валюты: ' + report.unreadableCount + '.' }), el('div', { class: 'actions expanded' }, button('Разметить расходы без роли', () => bulk('expense'), true), button('Разметить доходы без роли', () => bulk('income'), true), button('Уточнить поступления', () => table({ currency: currency.value, flow: 'incoming', state: 'review' }), true), button('Добавить отсутствующий заработок', () => editRow(null, { kind: 'income', category: 'Доход', custom: { [report.fields.role]: report.roles.earned } }), true)));
-    actual.append(coverage);
+    if (compact) actual.append(el('details', { class: 'economy-coverage-fold' }, el('summary', { text: 'Проверить полноту и разметку' }), coverage)); else actual.append(coverage);
     const sources = report.sources.filter(item => item.currency === currency.value);
     if (sources.length) {
       const section = el('details', {}, el('summary', { text: 'Источники заработка · ' + sources.length })), body = el('tbody');

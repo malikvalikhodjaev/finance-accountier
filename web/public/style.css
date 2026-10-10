@@ -244,3 +244,75 @@ a { color: #535358; }
 }
 .balances-panel{margin-bottom:16px}.balance-heading{justify-content:space-between;gap:12px}.balance-heading h2{margin:0}.balance-totals{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin:14px 0}.balance-total{display:flex;flex-direction:column;gap:6px}.balance-total>strong{font-size:28px;letter-spacing:-.5px;font-variant-numeric:tabular-nums}.balance-total>span{font-size:12px}.balance-account{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 0;border-bottom:1px solid #e5e5e8}.balance-account small{display:block;margin-top:5px}.balance-value{text-align:right;flex-shrink:0}.balance-value strong{display:block;font-variant-numeric:tabular-nums}.balance-value button{margin-top:7px}.balance-accounts summary{font-size:14px;cursor:pointer}.balance-footnote{font-size:12px}.embedded-app .balance-total>strong{font-size:25px}.embedded-app .balance-heading button{font-size:12px;padding:9px}.embedded-app .balance-totals{grid-template-columns:repeat(2,minmax(0,1fr))}.embedded-app .balance-account{flex-wrap:wrap}.embedded-app .balance-value{text-align:left}.embedded-app .balances-panel{padding:14px}
 .balance-totals .balance-total:only-child{grid-column:1/-1}
+
+/* Phone composition: one vertical content area; only full tables scroll sideways. */
+@media (max-width: 700px) {
+  main, .embedded-app main { padding: 12px 14px 24px; min-width: 0; }
+  #app > *, .toolbar > *, .row > *, .balance-account > * { min-width: 0; }
+  .widget, .embedded-app .balances-panel, .embedded-app .economy-actual { padding: 14px; border-radius: 18px; }
+  .toolbar, .embedded-app .toolbar { gap: 10px; margin-bottom: 12px; }
+  .toolbar .row { width: 100%; }
+  .toolbar select, .embedded-app .toolbar select { min-width: 0; width: 100%; font-size: 15px; min-height: 44px; }
+  .balance-heading { flex-wrap: nowrap; gap: 8px; }
+  .balance-heading h2 { font-size: 16px; line-height: 1.3; }
+  .balance-heading button, .embedded-app .balance-heading button { min-height: 40px; font-size: 12px; padding: 8px 12px; flex-shrink: 0; }
+  .balances-panel { margin-bottom: 12px; }
+  .balance-totals, .embedded-app .balance-totals { gap: 10px; margin: 10px 0; grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr)); }
+  .balance-total > strong, .embedded-app .balance-total > strong { font-size: 28px; line-height: 1.2; overflow-wrap: anywhere; }
+  .balance-total > span { font-size: 11px; line-height: 1.4; }
+  .balance-accounts { margin-top: 10px; }
+  .balance-accounts summary { font-size: 12px; }
+  .balance-account { align-items: flex-start; flex-wrap: wrap; }
+  .balance-account strong { overflow-wrap: anywhere; }
+  .filters, .embedded-app .economy-controls { padding: 12px; margin: 12px 0; gap: 10px; border-radius: 16px; }
+  .economy-controls, .embedded-app .economy-controls { display: grid; grid-template-columns: minmax(0, 1fr) minmax(90px, .55fr); }
+  .economy-controls .field, .embedded-app .economy-controls .field { width: auto; min-width: 0; }
+  .economy-controls label, .embedded-app .economy-controls label, .filters label { font-size: 12px; }
+  .economy-controls input, .economy-controls select, .embedded-app .economy-controls input, .embedded-app .economy-controls select { width: 100%; min-width: 0; font-size: 14px; min-height: 44px; padding: 8px 10px; }
+  .economy-controls > button, .embedded-app .economy-controls > button { grid-column: 1 / -1; min-height: 40px; padding: 8px 12px; font-size: 12px; }
+  .economy-actual .chart-heading, .embedded-app .economy-actual .chart-heading { align-items: center; gap: 8px; }
+  .economy-actual .chart-heading h2, .embedded-app .economy-actual .chart-heading h2 { font-size: 15px; margin: 0; }
+  .economy-actual .chart-heading button, .embedded-app .economy-actual .chart-heading button { font-size: 11px; padding: 8px 10px; min-height: 40px; }
+  .economy-fact-note { display: none; }
+  .economy-badge, .embedded-app .economy-badge { display: block; font-size: 11px; line-height: 1.45; padding: 8px 10px; margin-top: 12px; }
+  .economy-grid, .embedded-app .economy-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 12px 0; }
+  .economy-metric, .embedded-app .economy-metric { padding: 10px; gap: 6px; border-radius: 12px; min-width: 0; }
+  .economy-metric > span, .embedded-app .economy-metric > span { font-size: 11px; line-height: 1.4; }
+  .economy-metric strong, .embedded-app .economy-metric strong { font-size: 14px; line-height: 1.4; overflow-wrap: anywhere; }
+  .economy-metric small, .embedded-app .economy-metric small { font-size: 10px; line-height: 1.4; }
+  .economy-actual > p { font-size: 12px; }
+  .economy-model-fold, .economy-coverage-fold, .economy-help { margin-top: 12px; }
+  .economy-model-fold > summary, .economy-coverage-fold > summary, .economy-help > summary { padding: 10px 0; font-size: 13px; }
+  .economy-coverage-fold .economy-coverage { margin-top: 6px; }
+  .economy-coverage p, .economy-scenario p { font-size: 12px; }
+  .economy-scenario { margin-top: 12px; }
+  .economy-scenario .form-grid { gap: 12px; }
+  .economy-scenario .field { font-size: 12px; }
+  .economy-scenario > button { width: 100%; white-space: normal; font-size: 13px; }
+  .embedded-app .table-toolbar h1 { display: block; font-size: 21px; }
+  .table-toolbar > .row { justify-content: space-between; align-items: center; }
+  .table-toolbar > .row > button { font-size: 12px; min-height: 44px; padding: 8px 12px; }
+  .table-tools { width: 100%; margin: 0; }
+  .table-tools > summary { font-size: 12px; padding: 6px 0; }
+  .table-tools-content { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 12px; margin-top: 6px; background: #fff; border: 1px solid var(--line); border-radius: 14px; }
+  .table-tools-content .field { grid-column: 1 / -1; font-size: 12px; }
+  .table-tools-content button { width: 100%; min-width: 0; white-space: normal; font-size: 12px; }
+  .summary-line { font-size: 11px; padding: 4px 0 10px; }
+  .operation-list { display: grid; gap: 10px; }
+  .operation-card { padding: 13px; border: 1px solid var(--line); border-radius: 16px; background: #fff; min-width: 0; }
+  .operation-top { display: grid; grid-template-columns: minmax(0, 1fr) minmax(90px, .65fr); align-items: start; gap: 10px; }
+  .operation-open, .operation-open:hover, .operation-open:active { width: 100%; text-align: left; white-space: normal; overflow-wrap: anywhere; padding: 0; margin: 0; background: none; box-shadow: none; border: 0; border-radius: 0; transform: none; color: #1d1d1f; font-size: 14px; line-height: 1.4; min-height: 44px; }
+  .operation-amount { text-align: right; font-size: 15px; font-weight: 600; line-height: 1.4; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .operation-amount small { display: block; color: #6e6e73; font-size: 10px; font-weight: 450; }
+  .operation-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; margin-top: 8px; color: #6e6e73; font-size: 10px; line-height: 1.5; }
+  .operation-purpose { margin: 8px 0 0; font-size: 12px; overflow-wrap: anywhere; }
+  .operation-extra { margin-top: 8px; font-size: 12px; }
+  .operation-extra p { overflow-wrap: anywhere; }
+  [aria-label="Таблица операций"] > button { width: 100%; margin-top: 12px; }
+  dialog { width: calc(100% - 24px); max-width: 100%; padding: 16px; }
+  dialog input:not([type=checkbox]):not([type=radio]), dialog select, dialog textarea { min-width: 0; width: 100%; }
+}
+@media (max-width: 340px) {
+  .economy-grid, .embedded-app .economy-grid { grid-template-columns: 1fr; }
+  .operation-top { grid-template-columns: minmax(0, 1fr) minmax(80px, .55fr); }
+}

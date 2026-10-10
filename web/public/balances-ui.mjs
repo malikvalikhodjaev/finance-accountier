@@ -7,7 +7,8 @@ export async function renderBalances(panel, context) {
     const next = JSON.stringify(data); if (next === previous) return;
     const detailsOpen = panel.querySelector('details')?.open || false;
     panel.replaceChildren();
-    panel.append(el('div', { class: 'row balance-heading' }, el('h2', { text: 'Мои счета' }), button('Указать остаток', () => edit(null), true)));
+    const add = button(document.documentElement.classList.contains('embedded-app') || window.innerWidth <= 700 ? 'Остаток' : 'Указать остаток', () => edit(null), true); add.setAttribute('aria-label', 'Указать остаток');
+    panel.append(el('div', { class: 'row balance-heading' }, el('h2', { text: 'Мои счета' }), add));
     const totals = el('div', { class: 'balance-totals' });
     for (const total of data.totals) totals.append(el('div', { class: 'balance-total' }, el('span', { class: 'subtle', text: 'Известный баланс · ' + total.currency }), el('strong', { text: money(total.amountMinor) }), el('span', { class: 'subtle', text: total.knownCount < total.accountCount ? 'Неполный баланс · ' + total.knownCount + ' из ' + total.accountCount + ' счетов' : total.incomplete ? 'Нужно обновить остатки · на ' + total.oldestDate : 'Остатки на ' + total.oldestDate })));
     if (!data.totals.length) totals.append(el('p', { class: 'subtle', text: 'Актуальных остатков пока нет. Укажи баланс карты или наличных.' }));

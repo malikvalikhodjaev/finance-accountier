@@ -106,16 +106,18 @@ public final class MainActivity extends Activity {
         LinearLayout shell = vertical(); shell.setBackgroundColor(UIStyles.BACKGROUND);
         shell.setOnApplyWindowInsetsListener((view, insets) -> { shell.setPadding(0, insets.getSystemWindowInsetTop(), 0, insets.getSystemWindowInsetBottom()); return insets; });
         setContentView(shell); shell.requestApplyInsets();
-        LinearLayout identity = new LinearLayout(this); identity.setGravity(android.view.Gravity.CENTER_VERTICAL); identity.setPadding(dp(20), dp(10), dp(20), dp(10));
+        LinearLayout identity = new LinearLayout(this); identity.setGravity(android.view.Gravity.CENTER_VERTICAL); identity.setPadding(dp(16), dp(8), dp(16), dp(8));
         android.widget.ImageView logo = new android.widget.ImageView(this); logo.setImageResource(getResources().getIdentifier("icon", "drawable", getPackageName()));
-        LinearLayout.LayoutParams mark = new LinearLayout.LayoutParams(dp(36), dp(36)); mark.rightMargin = dp(10); identity.addView(logo, mark);
-        LinearLayout name = vertical(); heading(name, "My Personal", 16); TextView subtitle = label(name, "Throughput Accounting", 12); subtitle.setPadding(0, 0, 0, 0);
+        LinearLayout.LayoutParams mark = new LinearLayout.LayoutParams(dp(32), dp(32)); mark.rightMargin = dp(8); identity.addView(logo, mark);
+        LinearLayout name = vertical(); TextView title = label(name, "My Personal", 15); title.setPadding(0, 0, 0, 0); title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        TextView subtitle = label(name, "Throughput Accounting", 11); subtitle.setPadding(0, 0, 0, 0);
+        title.setMaxLines(1); subtitle.setMaxLines(2);
         identity.addView(name, new LinearLayout.LayoutParams(0, -2, 1));
         TextView owner = new TextView(this); owner.setText("МВ"); owner.setGravity(android.view.Gravity.CENTER); UIStyles.text(owner, 14);
         owner.setBackground(UIStyles.rounded(this, Color.rgb(232,232,236), 22, false)); owner.setContentDescription("Малик Валиходжаев · Настройки"); owner.setTooltipText("Малик Валиходжаев"); owner.setOnClickListener(v -> selectSection("settings"));
         identity.addView(owner, new LinearLayout.LayoutParams(dp(44), dp(44))); shell.addView(identity);
         body = new android.widget.FrameLayout(this); shell.addView(body, new LinearLayout.LayoutParams(-1, 0, 1));
-        navigation = new LinearLayout(this); navigation.setGravity(android.view.Gravity.CENTER); navigation.setPadding(dp(8), dp(8), dp(8), dp(8));
+        navigation = new LinearLayout(this); navigation.setGravity(android.view.Gravity.CENTER); navigation.setPadding(dp(6), dp(6), dp(6), dp(6));
         navigation.setBackgroundColor(Color.WHITE); navigation.setElevation(dp(8)); shell.addView(navigation);
     }
     private void renderBody() {
@@ -157,13 +159,13 @@ public final class MainActivity extends Activity {
         String[] tabs = {"dashboard", "table", "data", "settings"}, titles = {"Дашборды", "Таблицы", "Данные", "Настройки"};
         for (int i = 0; i < tabs.length; i++) {
             String tab = tabs[i]; boolean active = section.equals(tab);
-            LinearLayout item = vertical(); item.setGravity(android.view.Gravity.CENTER); item.setPadding(dp(2), dp(6), dp(2), dp(6));
+            LinearLayout item = vertical(); item.setGravity(android.view.Gravity.CENTER); item.setPadding(dp(2), dp(6), dp(2), dp(6)); item.setMinimumHeight(dp(60));
             if (active) { item.setBackground(UIStyles.rounded(this, UIStyles.BACKGROUND, 14, true)); item.setElevation(dp(2)); }
             item.addView(new NavigationIcon(this, tab, active), new LinearLayout.LayoutParams(dp(23), dp(23)));
-            TextView text = new TextView(this); text.setText(titles[i]); UIStyles.text(text, 11); text.setTextColor(active ? UIStyles.INK : UIStyles.MUTED); text.setPadding(0, dp(5), 0, 0); item.addView(text);
+            TextView text = new TextView(this); text.setText(titles[i]); UIStyles.text(text, 11); text.setTextColor(active ? UIStyles.INK : UIStyles.MUTED); text.setPadding(0, dp(4), 0, 0); text.setGravity(android.view.Gravity.CENTER); text.setMaxLines(2); item.addView(text);
             item.setContentDescription(titles[i]); text.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
             item.setSelected(active); item.setFocusable(true); item.setOnClickListener(v -> selectSection(tab));
-            LinearLayout.LayoutParams layout = new LinearLayout.LayoutParams(0, dp(64), 1); layout.setMargins(dp(2), 0, dp(2), 0); navigation.addView(item, layout);
+            LinearLayout.LayoutParams layout = new LinearLayout.LayoutParams(0, -2, 1); layout.setMargins(dp(2), 0, dp(2), 0); navigation.addView(item, layout);
         }
     }
     private void resetWeb() { if (webPanel != null) webPanel.destroy(); if (body != null && webContainer != null) body.removeView(webContainer); webPanel = null; webContainer = null; }
