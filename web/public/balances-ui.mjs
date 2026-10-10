@@ -1,9 +1,10 @@
 export async function renderBalances(panel, context) {
   const { el, button, money, field, select, api, modal, message } = context;
-  let request = 0;
+  let request = 0, previous = '';
   const refresh = async () => {
     const current = ++request, data = await api('/api/balances');
     if (current !== request || !panel.isConnected) return;
+    const next = JSON.stringify(data); if (next === previous) return;
     const detailsOpen = panel.querySelector('details')?.open || false;
     panel.replaceChildren();
     panel.append(el('div', { class: 'row balance-heading' }, el('h2', { text: 'Мои счета' }), button('Указать остаток', () => edit(null), true)));
@@ -23,6 +24,7 @@ export async function renderBalances(panel, context) {
     }
     const accounts = el('details', { class: 'balance-accounts' }, el('summary', { text: 'Счета · ' + data.accounts.filter(account => account.included).length }), list, el('p', { class: 'subtle balance-footnote', text: 'Последние известные остатки, независимо от периода дашборда. Карты без операций за 30 дней изначально не включены. Валюты считаются отдельно. Указание остатка не создаёт доход или расход.' })); accounts.open = detailsOpen;
     panel.append(accounts);
+    previous = next;
   };
   function edit(account) {
     const dateToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tashkent', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());

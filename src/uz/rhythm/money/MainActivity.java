@@ -45,10 +45,14 @@ public final class MainActivity extends Activity {
     private boolean showIgnored = false;
     private Boolean expandSetup = true;
     private String section = "dashboard", webServer = "";
-    private LinearLayout navigation, body, webContainer;
+    private LinearLayout navigation, webContainer;
+    private android.widget.FrameLayout body;
     private FinanceWebPanel webPanel;
     private boolean offline;
     private boolean exporting;
+    private ScrollView nativeScroll;
+    private volatile int renderGeneration;
+    private final java.util.concurrent.ExecutorService reads = java.util.concurrent.Executors.newSingleThreadExecutor();
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -63,7 +67,7 @@ public final class MainActivity extends Activity {
         openPurposeIntent(getIntent());
     }
     @Override public void onResume() { super.onResume(); BankNotifications.ensureConnected(this); if (store != null && (webPanel == null || !(section.equals("dashboard") || section.equals("table")))) render(); PromptOverlay.resume(this); }
-    @Override public void onDestroy() { resetWeb(); if (store != null) store.close(); super.onDestroy(); }
+    @Override public void onDestroy() { reads.shutdownNow(); resetWeb(); if (store != null) store.close(); super.onDestroy(); }
     @Override public void onNewIntent(Intent intent) { super.onNewIntent(intent); setIntent(intent); acceptShared(intent); render(); openPurposeIntent(intent); }
     private void openPurposeIntent(Intent intent) {
         String id = intent.getStringExtra(PaymentPrompts.EVENT_EXTRA);
@@ -81,7 +85,24 @@ public final class MainActivity extends Activity {
         }
     }
     private void render() {
+        final long started = android.os.SystemClock.elapsedRealtime();
+        renderGeneration++;
         if (webPanel != null && (!SyncConfig.connected(this) || !webServer.equals(SyncConfig.url(this)))) resetWeb();
+        if (body == null) createShell();
+        renderNavigation();
+        if (webContainer != null) webContainer.setVisibility(View.INVISIBLE);
+        if (nativeScroll != null) nativeScroll.setVisibility(View.INVISIBLE);
+        renderBody();
+        final String selected = section; final int generation = renderGeneration;
+        body.getViewTreeObserver().addOnPreDrawListener(new android.view.ViewTreeObserver.OnPreDrawListener() {
+            public boolean onPreDraw() {
+                if (body.getViewTreeObserver().isAlive()) body.getViewTreeObserver().removeOnPreDrawListener(this);
+                if (generation == renderGeneration) android.util.Log.i("FinancePerf", "native tab=" + selected + " paint_ms=" + (android.os.SystemClock.elapsedRealtime() - started));
+                return true;
+            }
+        });
+    }
+    private void createShell() {
         LinearLayout shell = vertical(); shell.setBackgroundColor(UIStyles.BACKGROUND);
         shell.setOnApplyWindowInsetsListener((view, insets) -> { shell.setPadding(0, insets.getSystemWindowInsetTop(), 0, insets.getSystemWindowInsetBottom()); return insets; });
         setContentView(shell); shell.requestApplyInsets();
@@ -93,17 +114,19 @@ public final class MainActivity extends Activity {
         TextView owner = new TextView(this); owner.setText("МВ"); owner.setGravity(android.view.Gravity.CENTER); UIStyles.text(owner, 14);
         owner.setBackground(UIStyles.rounded(this, Color.rgb(232,232,236), 22, false)); owner.setContentDescription("Малик Валиходжаев · Настройки"); owner.setTooltipText("Малик Валиходжаев"); owner.setOnClickListener(v -> selectSection("settings"));
         identity.addView(owner, new LinearLayout.LayoutParams(dp(44), dp(44))); shell.addView(identity);
-        body = vertical(); shell.addView(body, new LinearLayout.LayoutParams(-1, 0, 1));
+        body = new android.widget.FrameLayout(this); shell.addView(body, new LinearLayout.LayoutParams(-1, 0, 1));
         navigation = new LinearLayout(this); navigation.setGravity(android.view.Gravity.CENTER); navigation.setPadding(dp(8), dp(8), dp(8), dp(8));
-        navigation.setBackgroundColor(Color.WHITE); navigation.setElevation(dp(8)); shell.addView(navigation); renderNavigation();
+        navigation.setBackgroundColor(Color.WHITE); navigation.setElevation(dp(8)); shell.addView(navigation);
+    }
+    private void renderBody() {
         if ((section.equals("dashboard") || section.equals("table")) && SyncConfig.connected(this) && !offline) {
             if (webContainer == null) {
                 webContainer = vertical(); webContainer.setGravity(android.view.Gravity.CENTER);
                 label(webContainer, "Открываю " + (section.equals("dashboard") ? "дашборды…" : "таблицы…"), 16);
                 android.widget.ProgressBar loading = new android.widget.ProgressBar(this); webContainer.addView(loading, new LinearLayout.LayoutParams(dp(30), dp(30)));
+                body.addView(webContainer, new android.widget.FrameLayout.LayoutParams(-1, -1));
             }
-            if (webContainer.getParent() instanceof android.view.ViewGroup) ((android.view.ViewGroup)webContainer.getParent()).removeView(webContainer);
-            body.addView(webContainer, new LinearLayout.LayoutParams(-1, -1));
+            webContainer.setVisibility(View.VISIBLE);
             if (webPanel == null) {
                 webServer = SyncConfig.url(this);
                 webPanel = new FinanceWebPanel(this, webContainer, section, new FinanceWebPanel.Host() {
@@ -113,8 +136,9 @@ public final class MainActivity extends Activity {
             }
             return;
         }
-        ScrollView scroll = new ScrollView(this); scroll.setFillViewport(true); page = vertical(); page.setPadding(dp(20), dp(8), dp(20), dp(24));
-        scroll.addView(page); body.addView(scroll, new LinearLayout.LayoutParams(-1, -1));
+        if (nativeScroll == null) { nativeScroll = new ScrollView(this); nativeScroll.setFillViewport(true); body.addView(nativeScroll, new android.widget.FrameLayout.LayoutParams(-1, -1)); }
+        nativeScroll.removeAllViews(); nativeScroll.setVisibility(View.VISIBLE);
+        page = vertical(); page.setPadding(dp(20), dp(8), dp(20), dp(24)); nativeScroll.addView(page); nativeScroll.scrollTo(0, 0);
         if (section.equals("settings")) renderSettings(); else if (section.equals("data")) renderData();
         else if (section.equals("table")) renderLocalTable(); else renderLocalDashboard();
     }
@@ -142,7 +166,19 @@ public final class MainActivity extends Activity {
             LinearLayout.LayoutParams layout = new LinearLayout.LayoutParams(0, dp(64), 1); layout.setMargins(dp(2), 0, dp(2), 0); navigation.addView(item, layout);
         }
     }
-    private void resetWeb() { if (webPanel != null) webPanel.destroy(); webPanel = null; webContainer = null; }
+    private void resetWeb() { if (webPanel != null) webPanel.destroy(); if (body != null && webContainer != null) body.removeView(webContainer); webPanel = null; webContainer = null; }
+    private interface DataText { String read(EventStore database) throws Exception; }
+    private void loadText(TextView target, DataText query) {
+        final int generation = renderGeneration;
+        reads.execute(() -> {
+            if (generation != renderGeneration || reads.isShutdown()) return;
+            String result;
+            try (EventStore database = new EventStore(getApplicationContext())) { result = query.read(database); }
+            catch (Exception error) { result = "Не удалось обновить сведения. Открой раздел ещё раз."; }
+            final String text = result;
+            runOnUiThread(() -> { if (!isFinishing() && !isDestroyed() && generation == renderGeneration && target.isAttachedToWindow()) { target.setText(text); target.setVisibility(text.isEmpty() ? View.GONE : View.VISIBLE); } });
+        });
+    }
     @Override protected void onSaveInstanceState(Bundle state) { super.onSaveInstanceState(state); state.putString("section", section); state.putInt("period", period); }
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data); if (webPanel != null) webPanel.result(request, result, data);
@@ -270,7 +306,7 @@ public final class MainActivity extends Activity {
         LinearLayout shared = card(page); heading(shared, "Связь с компьютером", 20);
         label(shared, SyncConfig.connected(this) ? "Общая база подключена" : "Общая база не подключена", 14);
         if (SyncConfig.connected(this)) {
-            label(shared, "Ожидают отправки: " + store.pendingSync() + " · Конфликтов: " + store.syncConflicts(), 13);
+            loadText(label(shared, "Проверяю синхронизацию…", 13), database -> "Ожидают отправки: " + database.pendingSync() + " · Конфликтов: " + database.syncConflicts());
             String lastSync = SyncConfig.prefs(this).getString("lastSync", "");
             if (!lastSync.isEmpty()) label(shared, "Последняя связь: " + java.time.Instant.parse(lastSync).atZone(Formats.ZONE).format(java.time.format.DateTimeFormatter.ofPattern("dd.MM HH:mm")), 13);
             String syncError = SyncConfig.prefs(this).getString("error", ""); if (!syncError.isEmpty()) label(shared, syncError, 13);
@@ -281,20 +317,17 @@ public final class MainActivity extends Activity {
     }
     private void renderData() {
         heading(page, "Данные", 28); label(page, "Источники, загрузка истории и проверка операций", 14);
-        JSONObject statistics = store.statistics();
         LinearLayout quality = card(page); heading(quality, "Нужно проверить", 20);
-        label(quality, "На уточнение: " + statistics.optInt("review") + " · Возможные повторы: " + statistics.optInt("duplicates"), 14);
-        label(quality, "Без категории: " + statistics.optInt("categories") + " · Без ответа «На что?»: " + statistics.optInt("unanswered"), 14);
+        loadText(label(quality, "Проверяю операции…", 14), database -> { JSONObject stats = database.statistics(); return "На уточнение: " + stats.optInt("review") + " · Возможные повторы: " + stats.optInt("duplicates") + "\nБез категории: " + stats.optInt("categories") + " · Без ответа «На что?»: " + stats.optInt("unanswered"); });
         button(quality, "Открыть операции телефона", () -> { offline = true; section = "table"; render(); });
         LinearLayout statements = card(page); heading(statements, "Выписки и заказы", 20);
-        int count = StatementInbox.list(this).size();
-        button(statements, count > 0 ? "Полученные выписки: " + count : "Добавить банковскую выписку", () -> startActivity(new Intent(this, ImportActivity.class)));
+        button(statements, "Банковские выписки", () -> startActivity(new Intent(this, ImportActivity.class)));
+        loadText(label(statements, "Проверяю полученные файлы…", 13), database -> "Полученных выписок: " + StatementInbox.list(getApplicationContext()).size());
         label(statements, "PDF банков и Excel Payme можно отправить сюда через «Поделиться».", 13);
         if (SyncConfig.connected(this)) button(statements, "Заказы сервисов", () -> openWeb("orders"));
         LinearLayout history = card(page); heading(history, "История банковских SMS", 20);
         label(history, "Забрать старые операции с телефона. Переводы и неясные поступления проверяются отдельно от расходов.", 14);
-        JSONObject imported = store.historyState();
-        if (imported.has("total")) label(history, "Просмотрено SMS: " + imported.optInt("scanned") + " из " + imported.optInt("total") + " · Добавлено операций: " + imported.optInt("inserted"), 13);
+        loadText(label(history, "Проверяю историю импорта…", 13), database -> { JSONObject imported = database.historyState(); return imported.has("total") ? "Просмотрено SMS: " + imported.optInt("scanned") + " из " + imported.optInt("total") + " · Добавлено операций: " + imported.optInt("inserted") : ""; });
         button(history, "Импортировать старые SMS", () -> startActivity(new Intent(this, HistoryActivity.class)));
         button(history, "Проверить переводы между моими картами", () -> startActivity(new Intent(this, TransfersActivity.class)));
 

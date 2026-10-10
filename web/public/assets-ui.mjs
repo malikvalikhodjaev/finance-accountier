@@ -1,7 +1,10 @@
+const snapshots = new WeakMap();
 export async function renderAssets(panel, context) {
   const { el, button, money, field, select, api, modal, state } = context, generation = state.generation;
+  state.refreshBoard = () => renderAssets(panel, context);
   const result = await api('/api/assets');
   if (generation !== state.generation || state.boardId !== 'assets' || state.tab !== 'dashboard') return;
+  const snapshot = JSON.stringify(result); if (snapshots.get(panel) === snapshot) return;
   const amount = value => String(BigInt(value) / 100n) + '.' + String(BigInt(value) % 100n).padStart(2, '0');
   function edit(row = null) {
     const now = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tashkent', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
@@ -18,4 +21,5 @@ export async function renderAssets(panel, context) {
   const body = el('tbody');
   for (const row of result.rows) body.append(el('tr', {}, el('td', { text: row.name }), el('td', { text: result.kinds[row.kind] }), el('td', { text: money(row.amountMinor) + ' ' + row.currency }), el('td', { text: row.asOf }), el('td', {}, button('Обновить оценку', () => edit(row), true))));
   panel.replaceChildren(el('section', { class: 'widget', 'aria-label': 'Активы и обязательства' }, el('div', { class: 'chart-heading' }, el('h2', { text: 'Активы и обязательства' }), button('Добавить актив', () => edit())), el('p', { class: 'subtle', text: 'Текущие оценки и остатки на указанную дату. Покупка актива и перевод между своими картами не доказывают его текущую стоимость. Оценки здесь не создают банковских операций и не увеличивают заработок.' }), result.rows.length ? el('div', { class: 'economy-grid' }, ...result.totals.map(item => el('div', { class: 'economy-metric' }, el('span', { text: 'Чистые активы · ' + item.currency }), el('strong', { text: money(item.netMinor) }), el('small', { text: 'Активы: ' + money(item.assetsMinor) + '. Обязательства: ' + money(item.liabilitiesMinor) + '. Даты оценок: ' + item.oldestDate + ' — ' + item.newestDate + '.' })))) : el('p', { text: 'Нет данных об оценках активов. Это не означает, что активы равны нулю.' }), el('div', { class: 'table-wrap' }, el('table', {}, el('thead', {}, el('tr', {}, ...['Актив / обязательство', 'Тип', 'Оценка', 'Дата', 'Действие'].map(text => el('th', { text })))), body))));
+  snapshots.set(panel, snapshot);
 }

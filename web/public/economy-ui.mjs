@@ -13,7 +13,7 @@ export async function renderEconomy(panel, context) {
   const model = el('a', { href: '#economy-monthly-model', text: 'Модель обычного месяца' });
   panel.replaceChildren(...(compact ? [controls, actual, help, model, scenario] : [explanation, controls, model, actual, scenario]));
   state.economyDrafts ||= {};
-  let report, plan, request = 0;
+  let report, plan, request = 0, actualKey = '', planKey = '';
   const periodFilters = () => {
     if (!month.value) return { period: 'all' };
     const [year, number] = month.value.split('-').map(Number), end = new Date(Date.UTC(year, number, 0)).toISOString().slice(0, 10);
@@ -27,7 +27,10 @@ export async function renderEconomy(panel, context) {
     const params = new URLSearchParams(periodFilters()); params.set('currency', currency.value);
     const [nextReport, nextPlan] = await Promise.all([api('/api/economy?' + params), api('/api/economy/plan?currency=' + currency.value)]);
     if (generation !== state.generation || ticket !== request || state.tab !== 'dashboard' || state.boardId !== 'economy') return;
-    report = nextReport; plan = nextPlan; drawActual(); drawScenario();
+    const nextActual = JSON.stringify([nextReport, month.value, currency.value]), nextScenario = JSON.stringify([nextPlan, currency.value]);
+    report = nextReport; plan = nextPlan;
+    if (actualKey !== nextActual) { drawActual(); actualKey = nextActual; }
+    if (planKey !== nextScenario) { drawScenario(); planKey = nextScenario; }
   }
   function bulk(kind) {
     const rows = report.unassigned.filter(row => row.kind === kind && row.currency === currency.value);
@@ -97,5 +100,6 @@ export async function renderEconomy(panel, context) {
     draw(); status.textContent = draft ? baseVersion !== plan.version ? 'Черновик сохранён в этой вкладке. Модель изменилась в другой вкладке; сохранение потребует сверки.' : 'Черновик · ещё не сохранён' : plan.version ? 'Сохранённая модель · версия ' + plan.version : 'Модель пока не заполнена';
   }
   month.onchange = () => refresh().catch(error => message(error.message)); currency.onchange = () => refresh().catch(error => message(error.message));
+  state.refreshBoard = refresh;
   await refresh();
 }

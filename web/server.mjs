@@ -18,6 +18,7 @@ assets['/economy-ui.mjs'] = ['economy-ui.mjs', 'text/javascript'];
 assets['/economy-math.mjs'] = ['economy-math.mjs', 'text/javascript'];
 assets['/assets-ui.mjs'] = ['assets-ui.mjs', 'text/javascript'];
 assets['/balances-ui.mjs'] = ['balances-ui.mjs', 'text/javascript'];
+assets['/page-cache.mjs'] = ['page-cache.mjs', 'text/javascript'];
 const token = () => randomBytes(32).toString('base64url');
 const privateIP = ip => /^(?:10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.)/.test(ip);
 export function createFinanceServer({ directory = path.join(root, '.web'), allowLocalLogin = true, advertisedHost = null, port = 8788, importParser = null } = {}) {

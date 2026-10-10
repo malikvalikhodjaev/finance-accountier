@@ -161,3 +161,27 @@ test('HTTP: данные закрыты, код одноразовый, токе
     await app.close(); const relative = path.relative(realpathSync(build), realpathSync(directory)); if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('Unexpected test directory'); rmSync(directory, { recursive: true });
   }
 });
+
+test('Телефон получает страницы по 30 строк без пропусков; итоги охватывают всю историю', async () => {
+  const build = path.join(root, 'build'); mkdirSync(build, { recursive: true }); const directory = mkdtempSync(path.join(build, 'pagination-test-'));
+  const app = createFinanceServer({ directory, allowLocalLogin: true });
+  await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve)); const url = 'http://127.0.0.1:' + app.server.address().port;
+  try {
+    push(app.store, sample());
+    for (let index = 0; index < 60; index++) push(app.store, sample());
+    const cookie = (await fetch(url + '/')).headers.get('set-cookie').split(';')[0], headers = { Cookie: cookie };
+    const ids = [];
+    for (const offset of [0, 30, 60]) {
+      const response = await fetch(url + '/api/events?period=all&limit=30&offset=' + offset, { headers });
+      assert.equal(response.headers.get('cache-control'), 'no-store');
+      const page = await response.json(); assert.equal(page.total, 61); assert.equal(page.rows.length, offset === 60 ? 1 : 30);
+      assert.ok(page.rows.every(row => !('raw_text' in row))); ids.push(...page.rows.map(row => row.id));
+    }
+    assert.equal(new Set(ids).size, 61);
+    const first = app.store.get(ids[0]); app.store.edit(first.id, { expectedVersion: first.version, event: { purpose: 'проверка обновления' } });
+    const refreshed = await (await fetch(url + '/api/events?period=all&limit=30', { headers })).json();
+    assert.equal(refreshed.rows.find(row => row.id === first.id).purpose, 'проверка обновления');
+  } finally {
+    await app.close(); const relative = path.relative(realpathSync(build), realpathSync(directory)); if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('Unexpected test directory'); rmSync(directory, { recursive: true });
+  }
+});

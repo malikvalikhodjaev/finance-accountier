@@ -1,4 +1,5 @@
 'use strict';
+import { PageCache } from './page-cache.mjs';
 const app = document.querySelector('#app'), dialog = document.querySelector('#dialog'), dialogForm = document.querySelector('#dialog-form'), content = document.querySelector('#dialog-content'), dialogError = document.querySelector('#dialog-error');
 const names = { date: 'Дата', time: 'Время', merchant: 'Магазин / отправитель', amount_minor: 'Сумма', currency: 'Валюта', kind: 'Тип', flow: 'Движение', category: 'Категория', purpose: 'На что', state: 'Учёт', description: 'Описание', source_name: 'Источник', card_suffix: 'Карта', balance_minor: 'Остаток' };
 const kinds = { expense: 'Расход', income: 'Доход', transfer: 'Свои деньги', unknown: 'Уточнить' }, statuses = { recorded: 'Учтено', review: 'Уточнить', duplicate: 'Возможный повтор', ignored: 'Исключено' };
@@ -15,6 +16,30 @@ function route(tab, board = '') {
 }
 const state = { meta: null, tab: ['table', 'orders'].includes(initialTab) ? initialTab : 'dashboard', filters: { period: 'all' }, columns: [...defaults], viewId: '', boardId: new URL(location.href).searchParams.get('board') || 'economy', chartGroup: 'month', chartCurrency: '', rows: [], total: 0, offset: 0, generation: 0 };
 let saveDialog, timer, tablePanel, dialogGeneration = 0;
+const pages = new PageCache();
+let activePage = null, pendingReads = 0;
+function pageKey() { return state.tab === 'dashboard' ? 'dashboard:' + state.boardId : state.tab; }
+function pageSignature() {
+  return JSON.stringify({ filters: state.filters, columns: state.columns, view: state.viewId, board: state.boardId, month: state.economyMonth, currency: state.economyCurrency, group: state.chartGroup, chartCurrency: state.chartCurrency, fields: state.meta.fields, views: state.meta.views, dashboards: state.meta.dashboards, conflicts: state.meta.conflicts });
+}
+function painted(page, cached) {
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (page !== activePage) return;
+    const sample = { tab: state.tab, cached, paintMs: Math.round(performance.now() - page.started) };
+    window.financePerformance = [...(window.financePerformance || []).slice(-19), sample];
+    console.info('FinancePerf ' + JSON.stringify(sample));
+  }));
+}
+function pageReady(part, generation = state.generation) {
+  if (!activePage || activePage.generation !== generation || activePage.ready) return;
+  activePage.parts.add(part);
+  if (state.tab === 'dashboard' && !(activePage.parts.has('board') && activePage.parts.has('balances'))) return;
+  activePage.ready = true; painted(activePage, false);
+}
+async function refreshPage() {
+  if (state.tab === 'table') await loadRows(false, true);
+  else if (state.tab === 'dashboard') await Promise.all([state.refreshBoard?.(), state.refreshBalances?.()]);
+}
 function el(tag, properties = {}, ...children) {
   const element = document.createElement(tag);
   for (const [key, value] of Object.entries(properties)) {
@@ -30,10 +55,15 @@ function el(tag, properties = {}, ...children) {
 const button = (text, action, quiet = false) => el('button', { type: 'button', text, class: quiet ? 'quiet' : '', onclick: () => Promise.resolve(action()).catch(error => message(error.message)) });
 function message(text) { const box = document.querySelector('#message'); box.textContent = text; box.style.display = 'block'; clearTimeout(timer); timer = setTimeout(() => box.style.display = 'none', 7000); }
 async function api(url, options = {}) {
-  const response = await fetch(url, { ...options, headers: { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...options.headers }, body: options.body ? JSON.stringify(options.body) : undefined });
-  const data = await response.json();
-  if (!response.ok) { const error = new Error(data.error || 'Не удалось выполнить запрос.'); error.status = response.status; error.details = data.details; throw error; }
-  return data;
+  const reading = !options.method || options.method === 'GET';
+  if (reading) pendingReads++;
+  try {
+    const response = await fetch(url, { ...options, headers: { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...options.headers }, body: options.body ? JSON.stringify(options.body) : undefined });
+    const data = await response.json();
+    if (!response.ok) { if (response.status === 401) pages.invalidate(); const error = new Error(data.error || 'Не удалось выполнить запрос.'); error.status = response.status; error.details = data.details; throw error; }
+    if (!reading) pages.invalidate();
+    return data;
+  } finally { if (reading) pendingReads--; }
 }
 function money(value) {
   if (value === null || value === undefined || value === '') return '—';
@@ -145,11 +175,27 @@ async function resumeStatementImport() {
   catch (error) { if (dialog.open && generation === dialogGeneration) loading.textContent = 'Не удалось открыть выписку: ' + error.message + ' Вернись в «Полученные выписки» и повтори проверку.'; }
 }
 function name(key) { return names[key] || state.meta.fields.find(field => field.id === key)?.name || key; }
-async function render() {
+async function render(navigate = false) {
+  const started = performance.now();
+  if (navigate && activePage && state.generation === activePage.generation && !pendingReads) {
+    pages.save(activePage, activePage.signature, { nodes: [...app.childNodes], scroll: window.scrollY, tablePanel, rows: state.rows, total: state.total, offset: state.offset, refreshBoard: state.refreshBoard, refreshBalances: state.refreshBalances });
+  }
+  const cached = navigate ? pages.take(pageKey(), pageSignature()) : null;
   route(state.tab, state.tab === 'dashboard' ? state.boardId : '');
   document.title = (state.tab === 'table' ? 'Таблицы' : state.tab === 'orders' ? 'Заказы' : 'Дашборды') + ' · My Personal Throughput Accounting';
   for (const b of document.querySelectorAll('[data-tab]')) b.classList.toggle('active', b.dataset.tab === state.tab);
-  app.replaceChildren(); state.generation++;
+  if (cached) {
+    activePage = cached; state.generation = cached.generation;
+    const saved = cached.payload; tablePanel = saved.tablePanel;
+    for (const key of ['rows', 'total', 'offset', 'refreshBoard', 'refreshBalances']) state[key] = saved[key];
+    app.replaceChildren(...saved.nodes); window.scrollTo(0, saved.scroll);
+    cached.started = started; painted(cached, true);
+    refreshPage().catch(error => { if (error.status === 401) login(); else message('Не удалось обновить данные: ' + error.message); });
+    return;
+  }
+  activePage = pages.create(pageKey()); activePage.started = started;
+  state.generation = activePage.generation; state.refreshBoard = null; state.refreshBalances = null;
+  app.replaceChildren(); window.scrollTo(0, 0);
   if (state.tab === 'table') renderTable(); else if (state.tab === 'orders') renderOrders().catch(error => message(error.message)); else renderDashboard();
 }
 function renderTable() {
@@ -159,18 +205,20 @@ function renderTable() {
   const tools = button('Настроить таблицу', () => { const open = actions.classList.toggle('expanded'); tools.setAttribute('aria-expanded', String(open)); }, true); tools.classList.add('mobile-tools'); tools.setAttribute('aria-expanded', 'false'); actions.append(tools);
   app.append(el('div', { class: 'toolbar' }, el('div', { class: 'row' }, el('h1', { text: 'Операции' }), view), actions));
   if (state.meta.conflicts) app.append(button('Разобрать конфликты: ' + state.meta.conflicts, showConflicts, true));
-  app.append(filterForm(() => loadRows(false))); tablePanel = el('section', { 'aria-label': 'Таблица операций' }); app.append(tablePanel); loadRows(false).catch(error => { tablePanel.replaceChildren(el('p', { text: error.message })); });
+  app.append(filterForm(() => loadRows(false))); tablePanel = el('section', { 'aria-label': 'Таблица операций' }); app.append(tablePanel);
+  const panel = tablePanel; loadRows(false).catch(error => { if (panel.isConnected) panel.replaceChildren(el('p', { text: error.message })); });
 }
-async function loadRows(append = false) {
+async function loadRows(append = false, preserve = false) {
   const generation = state.generation, requestId = state.rowsRequest = (state.rowsRequest || 0) + 1;
   if (!append) state.offset = 0;
-  const params = query(); params.set('offset', String(state.offset));
+  const params = query(); params.set('offset', String(state.offset)); params.set('limit', embedded || window.innerWidth <= 700 ? '30' : '100');
   const data = await api('/api/events?' + params);
   if (generation !== state.generation || requestId !== state.rowsRequest || state.tab !== 'table') return;
+  if (preserve && tablePanel.childNodes.length && state.total === data.total && JSON.stringify(data.rows) === JSON.stringify(state.rows.slice(0, data.rows.length))) { state.offset = state.rows.length; return; }
   state.rows = append ? [...state.rows, ...data.rows] : data.rows; state.total = data.total; state.offset = state.rows.length;
   tablePanel.replaceChildren();
   tablePanel.append(el('div', { class: 'summary-line' }, el('span', { text: 'Записей: ' + state.total + ' · На экране: ' + state.rows.length }), el('span', { text: state.meta.devices.filter(device => !device.revoked).length ? 'Телефон подключён к общей базе' : 'Подключи телефон, чтобы операции появлялись автоматически' })));
-  if (!state.rows.length) { tablePanel.append(el('div', { class: 'table-wrap empty' }, el('h2', { text: state.meta.count ? 'По этому фильтру операций нет' : 'Операции появятся здесь' }), el('p', { text: state.meta.count ? 'Измени период или фильтры.' : 'Подключи телефон через кнопку «Подключение». Можно также добавить наличную операцию вручную.' }))); return; }
+  if (!state.rows.length) { tablePanel.append(el('div', { class: 'table-wrap empty' }, el('h2', { text: state.meta.count ? 'По этому фильтру операций нет' : 'Операции появятся здесь' }), el('p', { text: state.meta.count ? 'Измени период или фильтры.' : 'Подключи телефон через кнопку «Подключение». Можно также добавить наличную операцию вручную.' }))); activePage.signature = pageSignature(); pageReady('table', generation); return; }
   const visible = state.columns.filter(key => names[key] || state.meta.fields.some(field => field.id === key && field.active));
   const head = el('tr', {}, ...visible.map(key => el('th', { scope: 'col', text: name(key) })), el('th', { scope: 'col', text: 'Действие' }));
   const body = el('tbody');
@@ -189,6 +237,7 @@ async function loadRows(append = false) {
   }
   tablePanel.append(el('div', { class: 'table-wrap' }, el('table', {}, el('thead', {}, head), body)));
   if (state.rows.length < state.total) tablePanel.append(button('Показать ещё', () => loadRows(true), true));
+  activePage.signature = pageSignature(); pageReady('table', generation);
 }
 async function editRow(id, preset = {}) {
   const detail = id ? await api('/api/events/' + id) : null, row = detail?.row || { date: today(), amount_minor: null, currency: 'UZS', kind: 'expense', state: 'recorded', category: '', purpose: '', merchant: '', description: '', custom: {}, ...preset };
@@ -280,26 +329,27 @@ function saveView() {
 function renderDashboard() {
   const balancesPanel = el('section', { class: 'widget balances-panel', 'aria-label': 'Баланс счетов' }), balancesGeneration = state.generation;
   app.append(balancesPanel); state.refreshBalances = null;
-  import('/balances-ui.mjs').then(module => { if (balancesGeneration === state.generation && state.tab === 'dashboard') return module.renderBalances(balancesPanel, { el, button, money, field, select, api, modal, message }); }).then(refresh => { if (balancesGeneration === state.generation) state.refreshBalances = refresh; }).catch(error => balancesPanel.replaceChildren(el('p', { text: 'Не удалось загрузить балансы: ' + error.message })));
+  import('/balances-ui.mjs').then(module => { if (balancesGeneration === state.generation && state.tab === 'dashboard') return module.renderBalances(balancesPanel, { el, button, money, field, select, api, modal, message }); }).then(refresh => { if (balancesGeneration === state.generation && refresh) { state.refreshBalances = refresh; activePage.signature = pageSignature(); pageReady('balances', balancesGeneration); } }).catch(error => balancesPanel.replaceChildren(el('p', { text: 'Не удалось загрузить балансы: ' + error.message })));
   if (['economy', 'assets'].includes(state.boardId)) {
     const choose = select([['economy', 'Моя экономика'], ['assets', 'Активы'], ...state.meta.dashboards.map(item => [item.id, item.name])], state.boardId); choose.setAttribute('aria-label', 'Выбор дашборда');
     choose.onchange = () => { state.boardId = choose.value; history.replaceState(null, '', '/?tab=dashboard&board=' + encodeURIComponent(state.boardId)); render(); };
     const panel = el('div'), generation = state.generation;
     app.append(el('div', { class: 'toolbar' }, el('div', { class: 'row' }, el('h1', { text: state.boardId === 'economy' ? 'Моя экономика' : 'Активы' }), choose)), panel);
     const selectedBoard = state.boardId;
-    import(selectedBoard === 'economy' ? '/economy-ui.mjs' : '/assets-ui.mjs').then(module => { if (generation === state.generation && state.tab === 'dashboard') return (selectedBoard === 'economy' ? module.renderEconomy : module.renderAssets)(panel, { el, button, money, field, select, api, modal, editRow, state, render, message }); }).catch(error => message(error.message));
+    import(selectedBoard === 'economy' ? '/economy-ui.mjs' : '/assets-ui.mjs').then(module => { if (generation === state.generation && state.tab === 'dashboard') return (selectedBoard === 'economy' ? module.renderEconomy : module.renderAssets)(panel, { el, button, money, field, select, api, modal, editRow, state, render, message }); }).then(() => { if (generation === state.generation && panel.childNodes.length) { activePage.signature = pageSignature(); pageReady('board', generation); } }).catch(error => message(error.message));
     return;
   }
   const board = state.meta.dashboards.find(board => board.id === state.boardId) || state.meta.dashboards[0]; state.boardId = board.id;
   const selectBoard = select([['economy', 'Моя экономика'], ['assets', 'Активы'], ...state.meta.dashboards.map(item => [item.id, item.name])], state.boardId); selectBoard.setAttribute('aria-label', 'Выбор дашборда'); selectBoard.onchange = () => { state.boardId = selectBoard.value; history.replaceState(null, '', '/?tab=dashboard&board=' + encodeURIComponent(state.boardId)); render(); };
   app.append(el('div', { class: 'toolbar' }, el('div', { class: 'row' }, el('h1', { text: 'Дашборды' }), selectBoard), el('div', { class: 'actions' }, button('Добавить доход', () => editRow(null, { kind: 'income', category: 'Доход' }), true), button('Добавить виджет', () => editWidget(null)), button('Новый дашборд', newBoard, true))));
-  let results = el('div', { class: 'boards' }), chart = el('section', { class: 'cashflow widget', 'aria-label': 'График доходов и расходов' }), request = 0;
+  let results = el('div', { class: 'boards' }), chart = el('section', { class: 'cashflow widget', 'aria-label': 'График доходов и расходов' }), request = 0, previous = '';
   const group = select([['day', 'По дням'], ['week', 'По неделям'], ['month', 'По месяцам']], state.chartGroup); group.setAttribute('aria-label', 'Разбивка графика');
   group.onchange = () => { state.chartGroup = group.value; load().catch(error => message(error.message)); };
   const load = async () => {
     const generation = state.generation, currentRequest = ++request, params = query(); params.set('id', state.boardId); params.set('group', state.chartGroup);
     const [response, series] = await Promise.all([api('/api/dashboard?' + params), api('/api/cashflow?' + params)]);
     if (generation !== state.generation || currentRequest !== request || state.tab !== 'dashboard') return;
+    const next = JSON.stringify([response, series, state.chartGroup, state.chartCurrency]); if (previous === next) return;
     drawCashflow(chart, series, group);
     results.replaceChildren();
     for (const widget of response.widgets) {
@@ -319,6 +369,7 @@ function renderDashboard() {
       results.append(card);
     }
     if (!response.widgets.length) results.append(el('div', { class: 'widget empty' }, el('h2', { text: 'Добавь первый виджет' }), el('p', { text: 'Выбери сумму или количество, разрез и валюту.' })));
+    previous = JSON.stringify([response, series, state.chartGroup, state.chartCurrency]); activePage.signature = pageSignature(); pageReady('board', generation);
   };
   app.append(filterForm(() => load().catch(error => message(error.message))), chart, results); state.refreshBoard = load; load().catch(error => chart.replaceChildren(el('p', { text: error.message })));
 }
@@ -452,6 +503,7 @@ async function showConflicts() {
   if (!result.conflicts.length) list.append(el('p', { text: 'Конфликтов нет.' })); modal('Одновременные изменения', list, null);
 }
 function login() {
+  pages.invalidate(); activePage = null; state.meta = null; state.generation = pages.create('login').generation;
   const password = el('input', { type: 'password', autocomplete: 'current-password', required: true, 'aria-label': 'Пароль' }), error = el('p', { role: 'alert' }), form = el('form', {}, field('Пароль', password), el('button', { type: 'submit', text: 'Войти' }), error);
   form.onsubmit = async event => { event.preventDefault(); try { await api('/api/login', { method: 'POST', body: { password: password.value } }); await loadMeta(); await render(); await resumeStatementImport(); } catch (problem) { error.textContent = problem.message; } };
   app.replaceChildren(el('section', { class: 'login' }, el('h1', { text: 'Войти в My Personal Throughput Accounting' }), el('p', { text: 'На основном компьютере открой 127.0.0.1:8788. Телефон подключается кодом из окна «Подключение».' }), form));
@@ -461,11 +513,11 @@ window.financeNavigate = tab => {
   const changed = state.tab !== tab;
   if (changed && dialog.open) dialog.close();
   state.tab = tab; route(tab, tab === 'dashboard' ? state.boardId : '');
-  if (state.meta && changed) render();
+  if (state.meta && changed) render(true);
   return tab;
 };
-for (const item of document.querySelectorAll('[data-tab]')) item.onclick = () => { if (!state.meta) return; state.tab = item.dataset.tab; render(); };
+for (const item of document.querySelectorAll('[data-tab]')) item.onclick = () => { if (!state.meta || state.tab === item.dataset.tab) return; state.tab = item.dataset.tab; render(true); };
 document.querySelector('#connect').onclick = () => state.meta ? connection() : login();
 async function start() { try { await loadMeta(); await render(); await resumeStatementImport(); } catch (error) { if (error.status === 401) login(); else app.replaceChildren(el('p', { text: 'Компьютер недоступен: ' + error.message }), button('Повторить', start)); } }
 start();
-setInterval(async () => { if (!state.meta || dialog.open || document.hidden) return; try { await loadMeta(); if (state.tab === 'table') await loadRows(false); else if (state.tab === 'dashboard') { if (state.refreshBoard) await state.refreshBoard(); if (state.refreshBalances) await state.refreshBalances(); } } catch (error) { if (error.status === 401) { state.meta = null; login(); } } }, 20000);
+setInterval(async () => { if (!state.meta || dialog.open || document.hidden || pendingReads) return; try { await loadMeta(); await refreshPage(); } catch (error) { if (error.status === 401) login(); } }, 20000);
