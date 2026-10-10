@@ -10,6 +10,7 @@ const run = (tool, args) => execFileSync(path.join(jdk, 'bin', tool + '.exe'), a
 run('javac', ['-encoding', 'UTF-8', '--release', '8', '-d', output,
   path.join(root, 'src/uz/rhythm/money/Formats.java'), path.join(root, 'src/uz/rhythm/money/BankParser.java'),
   path.join(root, 'src/uz/rhythm/money/UzumPushParser.java'), path.join(root, 'tests/UzumPushTests.java'),
+  path.join(root, 'src/uz/rhythm/money/NotificationText.java'), path.join(root, 'tests/NotificationTextTests.java'),
   path.join(root, 'src/uz/rhythm/money/PurposeRules.java'),
   path.join(root, 'src/uz/rhythm/money/IncomeReminderRules.java'), path.join(root, 'tests/ReminderTests.java'),
   path.join(root, 'src/uz/rhythm/money/IncomeTypes.java'),
@@ -19,6 +20,7 @@ run('javac', ['-encoding', 'UTF-8', '--release', '8', '-d', output,
   path.join(root, 'tests/ParserTests.java'), path.join(root, 'tests/ParseMessages.java'), path.join(root, 'tests/PurposeTests.java')]);
 run('java', ['-cp', output, 'uz.rhythm.money.ParserTests']);
 run('java', ['-cp', output, 'uz.rhythm.money.UzumPushTests']);
+run('java', ['-cp', output, 'uz.rhythm.money.NotificationTextTests']);
 run('java', ['-cp', output, 'uz.rhythm.money.PurposeTests']);
 run('java', ['-cp', output, 'uz.rhythm.money.ReminderTests']);
 run('java', ['-cp', output, 'uz.rhythm.money.HistoryTests']);

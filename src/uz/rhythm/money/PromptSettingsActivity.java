@@ -17,8 +17,11 @@ import android.widget.Toast;
 
 public final class PromptSettingsActivity extends Activity {
     private LinearLayout page;
+    private TextView collectorStatus, probeStatus;
+    private final android.os.Handler diagnostics = new android.os.Handler(android.os.Looper.getMainLooper());
     @Override public void onCreate(Bundle state) { super.onCreate(state); UIStyles.window(this); IncomeReminders.initialize(this); }
-    @Override public void onResume() { super.onResume(); IncomeReminders.schedule(this); render(); }
+    @Override public void onResume() { super.onResume(); BankNotifications.ensureConnected(this); IncomeReminders.schedule(this); render(); }
+    @Override public void onPause() { diagnostics.removeCallbacksAndMessages(null); super.onPause(); }
     private void render() {
         ScrollView scroll = new ScrollView(this); page = new LinearLayout(this); page.setOrientation(LinearLayout.VERTICAL); int pad = UIStyles.dp(this, 20); page.setPadding(pad, pad, pad, pad); scroll.addView(page); setContentView(scroll);
         scroll.setOnApplyWindowInsetsListener((view, insets) -> { scroll.setPadding(0, insets.getSystemWindowInsetTop(), 0, insets.getSystemWindowInsetBottom()); return insets; });
@@ -36,6 +39,15 @@ public final class PromptSettingsActivity extends Activity {
             render();
         });
         label("Уведомления Uzum Bank", 20);
+        collectorStatus = label(BankNotifications.status(this), 14);
+        probeStatus = label(probeText(), 14);
+        button("Проверить доставку уведомлений", true, () -> {
+            try { BankNotifications.probe(this); updateDiagnostics(); diagnostics.postDelayed(this::updateDiagnostics, 1500); diagnostics.postDelayed(this::updateDiagnostics, 5000); diagnostics.postDelayed(this::updateDiagnostics, 12000); }
+            catch (RuntimeException error) { Toast.makeText(this, error.getMessage(), Toast.LENGTH_LONG).show(); }
+        });
+        button("Восстановить сборщик", false, () -> { BankNotifications.refresh(this); updateDiagnostics(); diagnostics.postDelayed(this::updateDiagnostics, 2000); });
+        button("Доступ к уведомлениям Android", false, () -> settings(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)));
+        label("Если проверка не доставлена, выключи и снова включи доступ к уведомлениям My Personal Throughput Accounting. В настройках батареи телефона разреши работу приложения без ограничений и автозапуск.", 14);
         boolean uzum = CollectorConfig.apps(this).contains(UzumPushParser.PACKAGE);
         label(uzum ? "Uzum Bank выбран. После подтверждённого перевода вопрос работает без SMS." : "Uzum Bank пока не выбран как источник уведомлений.", 14);
         if (!uzum) button("Добавить Uzum Bank", true, () -> {
@@ -47,7 +59,7 @@ public final class PromptSettingsActivity extends Activity {
         });
         long lastPush = CollectorConfig.prefs(this).getLong("uzumLastPushAt", 0);
         if (lastPush > 0) label("Последнее уведомление: " + IncomeReminders.displayTime(lastPush) + " · " + CollectorConfig.prefs(this).getString("uzumLastPushStatus", ""), 14);
-        button("Проверить недавние уведомления", false, () -> { BankNotifications.refresh(this); Toast.makeText(this, "Проверю уведомления, которые ещё находятся в шторке", Toast.LENGTH_SHORT).show(); });
+        button("Проверить недавние уведомления", false, () -> { BankNotifications.refresh(this); Toast.makeText(this, "Проверю уведомления, которые ещё находятся в шторке", Toast.LENGTH_SHORT).show(); diagnostics.postDelayed(this::updateDiagnostics, 2000); });
         label("Поступления", 20);
         button("Добавить поступление", true, () -> startActivity(new Intent(this, IncomeActivity.class)));
         label(IncomeReminders.summary(this), 16);
@@ -91,7 +103,14 @@ public final class PromptSettingsActivity extends Activity {
     private void settings(Intent intent) {
         try { startActivity(intent); } catch (RuntimeException error) { Toast.makeText(this, "Открой разрешения My Personal Throughput Accounting в настройках телефона", Toast.LENGTH_LONG).show(); }
     }
-    private void label(String text, int size) { TextView view = new TextView(this); view.setText(text); UIStyles.text(view, size); view.setPadding(0, UIStyles.dp(this, 14), 0, UIStyles.dp(this, 8)); page.addView(view); }
+    private String probeText() {
+        long sent = CollectorConfig.prefs(this).getLong("listenerProbeSentAt", 0), received = CollectorConfig.prefs(this).getLong("listenerProbeReceivedAt", 0);
+        if (sent == 0) return "Проверка доставки ещё не запускалась. Она не создаёт финансовых операций.";
+        if (received >= sent) return "Проверка доставлена · " + IncomeReminders.displayTime(received);
+        return System.currentTimeMillis() - sent < 10000 ? "Жду проверочное уведомление от Android…" : "Проверка не доставлена. Восстанови сборщик или повторно включи доступ в настройках Android.";
+    }
+    private void updateDiagnostics() { if (collectorStatus != null) collectorStatus.setText(BankNotifications.status(this)); if (probeStatus != null) probeStatus.setText(probeText()); }
+    private TextView label(String text, int size) { TextView view = new TextView(this); view.setText(text); UIStyles.text(view, size); view.setPadding(0, UIStyles.dp(this, 14), 0, UIStyles.dp(this, 8)); page.addView(view); return view; }
     private void button(String text, boolean primary, Runnable action) {
         Button button = new Button(this); button.setText(text); UIStyles.button(button, primary); LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2); params.topMargin = UIStyles.dp(this, 10); page.addView(button, params); button.setOnClickListener(v -> action.run());
     }

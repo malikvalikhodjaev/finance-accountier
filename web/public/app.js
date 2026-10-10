@@ -278,6 +278,9 @@ function saveView() {
   modal('Сохранить фильтры и колонки', body, async () => { const view = await api('/api/views', { method: 'POST', body: { name: label.value, filters: state.filters, columns: state.columns, ...(replace.checked && current ? { id: current.id, expectedVersion: current.version } : {}) } }); state.viewId = view.id; await loadMeta(); render(); message('Представление сохранено'); });
 }
 function renderDashboard() {
+  const balancesPanel = el('section', { class: 'widget balances-panel', 'aria-label': 'Баланс счетов' }), balancesGeneration = state.generation;
+  app.append(balancesPanel); state.refreshBalances = null;
+  import('/balances-ui.mjs').then(module => { if (balancesGeneration === state.generation && state.tab === 'dashboard') return module.renderBalances(balancesPanel, { el, button, money, field, select, api, modal, message }); }).then(refresh => { if (balancesGeneration === state.generation) state.refreshBalances = refresh; }).catch(error => balancesPanel.replaceChildren(el('p', { text: 'Не удалось загрузить балансы: ' + error.message })));
   if (['economy', 'assets'].includes(state.boardId)) {
     const choose = select([['economy', 'Моя экономика'], ['assets', 'Активы'], ...state.meta.dashboards.map(item => [item.id, item.name])], state.boardId); choose.setAttribute('aria-label', 'Выбор дашборда');
     choose.onchange = () => { state.boardId = choose.value; history.replaceState(null, '', '/?tab=dashboard&board=' + encodeURIComponent(state.boardId)); render(); };
@@ -465,4 +468,4 @@ for (const item of document.querySelectorAll('[data-tab]')) item.onclick = () =>
 document.querySelector('#connect').onclick = () => state.meta ? connection() : login();
 async function start() { try { await loadMeta(); await render(); await resumeStatementImport(); } catch (error) { if (error.status === 401) login(); else app.replaceChildren(el('p', { text: 'Компьютер недоступен: ' + error.message }), button('Повторить', start)); } }
 start();
-setInterval(async () => { if (!state.meta || dialog.open || document.hidden) return; try { await loadMeta(); if (state.tab === 'table') await loadRows(false); else if (state.tab === 'dashboard' && state.refreshBoard) await state.refreshBoard(); } catch (error) { if (error.status === 401) { state.meta = null; login(); } } }, 20000);
+setInterval(async () => { if (!state.meta || dialog.open || document.hidden) return; try { await loadMeta(); if (state.tab === 'table') await loadRows(false); else if (state.tab === 'dashboard') { if (state.refreshBoard) await state.refreshBoard(); if (state.refreshBalances) await state.refreshBalances(); } } catch (error) { if (error.status === 401) { state.meta = null; login(); } } }, 20000);

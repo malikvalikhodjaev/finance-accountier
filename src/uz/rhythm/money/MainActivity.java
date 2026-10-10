@@ -62,7 +62,7 @@ public final class MainActivity extends Activity {
         render();
         openPurposeIntent(getIntent());
     }
-    @Override public void onResume() { super.onResume(); if (store != null && (webPanel == null || !(section.equals("dashboard") || section.equals("table")))) render(); PromptOverlay.resume(this); }
+    @Override public void onResume() { super.onResume(); BankNotifications.ensureConnected(this); if (store != null && (webPanel == null || !(section.equals("dashboard") || section.equals("table")))) render(); PromptOverlay.resume(this); }
     @Override public void onDestroy() { resetWeb(); if (store != null) store.close(); super.onDestroy(); }
     @Override public void onNewIntent(Intent intent) { super.onNewIntent(intent); setIntent(intent); acceptShared(intent); render(); openPurposeIntent(intent); }
     private void openPurposeIntent(Intent intent) {
@@ -232,6 +232,7 @@ public final class MainActivity extends Activity {
         boolean access = notificationAccess(), enabled = CollectorConfig.enabled(this);
         heading(setup, enabled ? "Сбор включён" : "Сбор на паузе", 18);
         label(setup, "Приложений выбрано: " + CollectorConfig.apps(this).size() + " · Доступ к уведомлениям: " + (access ? "есть" : "нужен"), 13);
+        label(setup, BankNotifications.status(this), 13);
         label(setup, CollectorConfig.apps(this).contains(UzumPushParser.PACKAGE) ? "Uzum Bank: уведомления включены" : "Uzum Bank не выбран — добавь его в «Окна и поступления»", 13);
         boolean smsReady = !CollectorConfig.prefs(this).getString("senders", "").trim().isEmpty() && checkSelfPermission(Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED;
         label(setup, "Приём SMS: " + (smsReady ? "настроен" : "не настроен"), 13);

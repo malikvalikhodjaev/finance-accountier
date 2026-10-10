@@ -9,7 +9,7 @@ function privateFiles() {
   if (forbidden.length) throw new Error('Личные файлы попали в Git: ' + forbidden.join(', '));
 }
 function validate() {
-  for (const args of [['test.mjs'], ['--test', 'tests/workflow.test.mjs', 'tests/web.test.mjs', 'tests/imports.test.mjs', 'tests/cashflow.test.mjs', 'tests/orders.test.mjs', 'tests/order-summary.test.mjs', 'tests/economy.test.mjs']]) console.log(run(process.execPath, args));
+  for (const args of [['test.mjs'], ['--test', 'tests/workflow.test.mjs', 'tests/web.test.mjs', 'tests/imports.test.mjs', 'tests/cashflow.test.mjs', 'tests/orders.test.mjs', 'tests/order-summary.test.mjs', 'tests/economy.test.mjs', 'tests/balances.test.mjs']]) console.log(run(process.execPath, args));
   console.log(run('python', ['tests/migration.py']));
   console.log(run('python', ['tests/imports_parser.py']));
 }

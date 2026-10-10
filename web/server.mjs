@@ -10,12 +10,14 @@ import { cashflow } from './cashflow.mjs';
 import { createOrders, services } from './orders.mjs';
 import { createEconomy } from './economy.mjs';
 import { createAssets } from './assets.mjs';
+import { createBalances } from './balances.mjs';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const assets = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/order-summary.mjs': ['order-summary.mjs', 'text/javascript'], '/style.css': ['style.css', 'text/css'], '/icon.svg': ['icon.svg', 'image/svg+xml'] };
 assets['/economy-ui.mjs'] = ['economy-ui.mjs', 'text/javascript'];
 assets['/economy-math.mjs'] = ['economy-math.mjs', 'text/javascript'];
 assets['/assets-ui.mjs'] = ['assets-ui.mjs', 'text/javascript'];
+assets['/balances-ui.mjs'] = ['balances-ui.mjs', 'text/javascript'];
 const token = () => randomBytes(32).toString('base64url');
 const privateIP = ip => /^(?:10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.)/.test(ip);
 export function createFinanceServer({ directory = path.join(root, '.web'), allowLocalLogin = true, advertisedHost = null, port = 8788, importParser = null } = {}) {
@@ -25,6 +27,7 @@ export function createFinanceServer({ directory = path.join(root, '.web'), allow
   const orders = createOrders(store);
   const economy = createEconomy(store);
   const personalAssets = createAssets(store);
+  const balances = createBalances(store);
   const credentialsPath = path.join(directory, 'auth.json');
   if (!existsSync(credentialsPath)) {
     const password = token(), salt = randomBytes(16).toString('hex');
@@ -134,6 +137,8 @@ export function createFinanceServer({ directory = path.join(root, '.web'), allow
       if (identity.mobile) fail('Открой таблицы внутри приложения.', 403);
       if (req.method === 'GET' && url.pathname === '/api/assets') return json(res, 200, personalAssets.report());
       if (req.method === 'POST' && url.pathname === '/api/assets') return json(res, 200, personalAssets.save(await body(req)));
+      if (req.method === 'GET' && url.pathname === '/api/balances') return json(res, 200, balances.report());
+      if (req.method === 'POST' && url.pathname === '/api/balances') return json(res, 200, balances.save(await body(req)));
       if (req.method === 'GET' && url.pathname === '/api/economy') return json(res, 200, economy.report(Object.fromEntries(url.searchParams)));
       if (req.method === 'GET' && url.pathname === '/api/economy/plan') return json(res, 200, economy.readPlan(url.searchParams.get('currency') || 'UZS'));
       if (req.method === 'POST' && url.pathname === '/api/economy/plan') return json(res, 200, economy.savePlan(await body(req)));
@@ -198,7 +203,7 @@ export function createFinanceServer({ directory = path.join(root, '.web'), allow
         const csv = [columns.map(key => cell(fields.find(field => field.id === key)?.name || key)).join(','), ...rows.map(row => columns.map(key => cell(key === 'amount' ? row.amount_minor === null ? '' : (BigInt(row.amount_minor) / 100n) + '.' + String(BigInt(row.amount_minor) % 100n).padStart(2, '0') : key.startsWith('f_') ? row.custom[key] ?? '' : row[key] ?? '')).join(','))].join('\r\n');
         res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="personal-throughput-accounting.csv"' }); return res.end('\uFEFF' + csv);
       }
-      if (req.method === 'GET' && url.pathname === '/api/backup') { res.setHeader('Content-Disposition', 'attachment; filename="personal-throughput-accounting-backup.json"'); return json(res, 200, { schema: 'rhythm-money-web-v1', exportedAt: new Date().toISOString(), events: store.all(), history: store.db.prepare('SELECT * FROM history').all(), sourceRevisions: store.db.prepare('SELECT * FROM source_revisions').all(), fields: store.settings('field'), views: store.settings('view'), dashboards: store.settings('dashboard'), serviceOrders: orders.backup(), economy: economy.backup(), personalAssets: personalAssets.backup() }); }
+      if (req.method === 'GET' && url.pathname === '/api/backup') { res.setHeader('Content-Disposition', 'attachment; filename="personal-throughput-accounting-backup.json"'); return json(res, 200, { schema: 'rhythm-money-web-v1', exportedAt: new Date().toISOString(), events: store.all(), history: store.db.prepare('SELECT * FROM history').all(), sourceRevisions: store.db.prepare('SELECT * FROM source_revisions').all(), fields: store.settings('field'), views: store.settings('view'), dashboards: store.settings('dashboard'), serviceOrders: orders.backup(), economy: economy.backup(), personalAssets: personalAssets.backup(), balances: balances.backup() }); }
       fail('Страница не найдена.', 404);
     } catch (error) {
       if (!error.status && !(error instanceof SyntaxError)) console.error(error);
