@@ -20,7 +20,7 @@ public final class PromptSettingsActivity extends Activity {
     private TextView collectorStatus, probeStatus;
     private final android.os.Handler diagnostics = new android.os.Handler(android.os.Looper.getMainLooper());
     @Override public void onCreate(Bundle state) { super.onCreate(state); UIStyles.window(this); IncomeReminders.initialize(this); }
-    @Override public void onResume() { super.onResume(); BankNotifications.ensureConnected(this); IncomeReminders.schedule(this); render(); }
+    @Override public void onResume() { super.onResume(); BankNotifications.ensureConnected(this); IncomeReminders.schedule(this); render(); diagnostics.postDelayed(this::updateDiagnostics, 1500); }
     @Override public void onPause() { diagnostics.removeCallbacksAndMessages(null); super.onPause(); }
     private void render() {
         ScrollView scroll = new ScrollView(this); page = new LinearLayout(this); page.setOrientation(LinearLayout.VERTICAL); int pad = UIStyles.dp(this, 20); page.setPadding(pad, pad, pad, pad); scroll.addView(page); setContentView(scroll);
@@ -47,6 +47,13 @@ public final class PromptSettingsActivity extends Activity {
         });
         button("Восстановить сборщик", false, () -> { BankNotifications.refresh(this); updateDiagnostics(); diagnostics.postDelayed(this::updateDiagnostics, 2000); });
         button("Доступ к уведомлениям Android", false, () -> settings(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)));
+        if (Build.MANUFACTURER.equalsIgnoreCase("Xiaomi")) {
+            label("На Xiaomi нужно отдельно включить «Автозапуск в фоне». Без него система может отклонять подключение сборщика даже при выданном доступе к уведомлениям. После включения нажми «Проверить доставку уведомлений».", 14);
+            button("Автозапуск Xiaomi", true, () -> {
+                try { startActivity(new Intent("miui.intent.action.OP_AUTO_START").setPackage("com.miui.securitycenter")); }
+                catch (RuntimeException error) { settings(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getPackageName()))); }
+            });
+        }
         label("Если проверка не доставлена, выключи и снова включи доступ к уведомлениям My Personal Throughput Accounting. В настройках батареи телефона разреши работу приложения без ограничений и автозапуск.", 14);
         boolean uzum = CollectorConfig.apps(this).contains(UzumPushParser.PACKAGE);
         label(uzum ? "Uzum Bank выбран. После подтверждённого перевода вопрос работает без SMS." : "Uzum Bank пока не выбран как источник уведомлений.", 14);

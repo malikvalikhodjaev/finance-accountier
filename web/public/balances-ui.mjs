@@ -8,7 +8,7 @@ export async function renderBalances(panel, context) {
     panel.replaceChildren();
     panel.append(el('div', { class: 'row balance-heading' }, el('h2', { text: 'Мои счета' }), button('Указать остаток', () => edit(null), true)));
     const totals = el('div', { class: 'balance-totals' });
-    for (const total of data.totals) totals.append(el('div', { class: 'balance-total' }, el('span', { class: 'subtle', text: 'Известный баланс · ' + total.currency }), el('strong', { text: money(total.amountMinor) }), el('span', { class: 'subtle', text: total.incomplete ? 'Нужно обновить остатки' : 'Остатки на ' + total.oldestDate })));
+    for (const total of data.totals) totals.append(el('div', { class: 'balance-total' }, el('span', { class: 'subtle', text: 'Известный баланс · ' + total.currency }), el('strong', { text: money(total.amountMinor) }), el('span', { class: 'subtle', text: total.knownCount < total.accountCount ? 'Неполный баланс · ' + total.knownCount + ' из ' + total.accountCount + ' счетов' : total.incomplete ? 'Нужно обновить остатки · на ' + total.oldestDate : 'Остатки на ' + total.oldestDate })));
     if (!data.totals.length) totals.append(el('p', { class: 'subtle', text: 'Актуальных остатков пока нет. Укажи баланс карты или наличных.' }));
     panel.append(totals);
     const list = el('div', { class: 'balance-list' });
